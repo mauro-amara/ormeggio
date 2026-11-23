@@ -1,0 +1,53 @@
+name: Compila Ormeggio
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Versione di Swift
+        run: swift --version
+
+      - name: Compila l'app
+        shell: bash
+        run: |
+          set -o pipefail
+          bash scripts/build-app.sh 2>&1 | tee build.log
+
+      - name: Crea il DMG
+        run: bash scripts/make-dmg.sh
+
+      - name: Allega il DMG all'esecuzione
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ormeggio-dmg
+          path: dist/*.dmg
+          retention-days: 30
+
+      # Pubblica DMG ed esito nel ramo "builds", anche se la compilazione fallisce,
+      # così il registro degli errori è leggibile senza aprire GitHub.
+      - name: Pubblica nel ramo builds
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p out
+          cp build.log out/build.log 2>/dev/null || echo "Nessun registro" > out/build.log
+          cp dist/*.dmg out/ 2>/dev/null || true
+          echo "${{ job.status }}" > out/esito.txt
+          echo "${GITHUB_SHA}" > out/commit.txt
+          cd out
+          git init -q -b builds
+          git config user.name "ormeggio-ci"
+          git config user.email "ci@users.noreply.github.com"
+          git add .
+          git commit -qm "Build ${GITHUB_SHA::7}: ${{ job.status }}"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" builds
