@@ -420,10 +420,12 @@ final class Engine {
         let usesChrome = scene.windows.contains { $0.bundleID == BrowserBridge.chromeID }
         let profiles = usesChrome ? BrowserBridge.chromeProfiles() : []
         let tracked = await inventory(displays: displays, profiles: profiles, visitAllDesktops: manageSpaces)
+        Log.write("Finestre trovate: \(tracked.count). " + Engine.describe(tracked))
 
         // 5. Abbinamento tra finestre salvate e finestre aperte
         let first = match(scene.windows, with: tracked)
         var assignments = first.assignments
+        Log.write("Abbinate \(assignments.count) finestre su \(scene.windows.count). Da riaprire: \(first.unmatched.map { "\($0.appName) \"\($0.title)\"" }.joined(separator: ", "))")
 
         // 6. Finestre da riaprire: cartelle, documenti, finestre del browser con le schede
         let reopened = first.unmatched.filter { reopen($0) }
@@ -436,6 +438,12 @@ final class Engine {
 
         // 7. Monitor e scrivania giusti
         await relocate(&assignments, scene: scene, displays: displays)
+        let misplaced = assignments.filter { $0.saved.desktop != nil && $0.saved.desktop != $0.tracked.desktop }
+        if !misplaced.isEmpty {
+            Log.write("Finestre rimaste sulla scrivania sbagliata: " + misplaced.map {
+                "\($0.saved.appName) (voluta \($0.saved.desktop ?? 0), attuale \($0.tracked.desktop ?? 0))"
+            }.joined(separator: ", "))
+        }
 
         // 8. Posizione e dimensione
         await placeFrames(assignments, scene: scene, displays: displays)
@@ -657,6 +665,42 @@ final class Engine {
         lines.append("Scene salvate: \(store.scenes.count)")
         if let scene = activeScene { lines.append("Scena attiva: \(scene.name)") }
         return lines.joined(separator: "\n")
+    }
+
+    /// Testo completo da mandare all'assistenza: diagnostica, scene (senza indirizzi web) e registro.
+    func supportReport() -> String {
+        var parts = ["=== Diagnostica ===", diagnostics(), "", "=== Scene ==="]
+        for scene in store.scenes {
+            parts.append("• \(scene.name) [\(scene.fingerprint)] automatica: \(scene.autoApply ? "sì" : "no"), salvata \(scene.savedAt)")
+            for display in scene.displays {
+                let desktops = display.spaceCount.map { "\($0)" } ?? "?"
+                let visible = display.currentDesktop.map { "\($0)" } ?? "?"
+                parts.append("   monitor \(display.name) [\(display.key)] \(display.mode?.label ?? "?"), scrivanie \(desktops), visibile \(visible)")
+            }
+            for window in scene.windows {
+                var line = "   - \(window.appName) · monitor \(window.displayKey) · scrivania \(window.desktop.map { "\($0)" } ?? "tutte o ?")"
+                line += " · \(Int(window.frame.width))×\(Int(window.frame.height))"
+                if let id = window.windowID { line += " · id \(id)" }
+                if let tabs = window.tabs { line += " · \(tabs.count) schede" }
+                if let profile = window.chromeProfile { line += " · profilo \(profile)" }
+                if window.folderPath != nil { line += " · cartella" }
+                if window.documentURL != nil { line += " · documento" }
+                parts.append(line)
+            }
+        }
+        parts.append("")
+        parts.append("=== Registro (ultime 400 righe) ===")
+        if let log = try? String(contentsOf: Paths.log, encoding: .utf8) {
+            parts.append(log.split(separator: "\n", omittingEmptySubsequences: false).suffix(400).joined(separator: "\n"))
+        }
+        return parts.joined(separator: "\n")
+    }
+
+    static func describe(_ tracked: [TrackedWindow]) -> String {
+        let groups = Dictionary(grouping: tracked) { "\($0.displayKey) scrivania \($0.desktop.map { "\($0)" } ?? "tutte")" }
+        return groups.keys.sorted().map { key in
+            "[\(key): " + (groups[key] ?? []).map { $0.live.appName }.joined(separator: ", ") + "]"
+        }.joined(separator: " ")
     }
 
     /// Le scorciatoie "Sposta a sinistra/destra di uno spazio" (ctrl + frecce) sono attive?

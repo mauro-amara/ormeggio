@@ -120,6 +120,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.addItem(commandItem("⚠︎ Attiva Ormeggio in Accessibilità…", #selector(openAccessibilitySettings)))
         }
 
+        // Monitor riconosciuti da macOS, con risoluzione e scrivanie.
+        menu.addItem(.separator())
+        menu.addItem(infoItem(displays.count == 1 ? "Monitor collegato" : "Monitor collegati"))
+        let layouts = SpacesManager.layouts(for: displays)
+        for display in displays {
+            var text = "   \(display.name)"
+            if let mode = display.mode { text += " · \(mode.label)" }
+            if let layout = layouts[display.id] { text += " · \(layout.count) \(layout.count == 1 ? "scrivania" : "scrivanie")" }
+            menu.addItem(infoItem(text))
+        }
+
         let scenes = store.scenes.sorted { lhs, rhs in
             let lhsHere = lhs.fingerprint == fingerprint
             let rhsHere = rhs.fingerprint == fingerprint
@@ -163,6 +174,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settingsMenu.addItem(loginItem)
         settingsMenu.addItem(.separator())
         settingsMenu.addItem(commandItem("Diagnostica…", #selector(showDiagnostics)))
+        settingsMenu.addItem(commandItem("Salva diagnostica per l'assistenza…", #selector(exportReport)))
         settingsMenu.addItem(commandItem("Apri la cartella dei dati", #selector(openDataFolder)))
         settingsMenu.addItem(.separator())
         settingsMenu.addItem(commandItem("Disinstalla Ormeggio…", #selector(uninstall)))
@@ -220,7 +232,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let alert = NSAlert()
         alert.messageText = "Salva scena"
-        alert.informativeText = "Salvo app aperte, finestre su ogni monitor e scrivania, scala dei monitor, cartelle del Finder e schede del browser. Se il nome esiste già, aggiorno quella scena.\n\nPer vedere tutte le finestre passo da ogni scrivania: per qualche secondo non toccare mouse e tastiera."
+        let monitors = DisplayManager.activeDisplays().map(\.name).joined(separator: " + ")
+        alert.informativeText = "Monitor riconosciuti: \(monitors).\n\nSalvo app aperte, finestre su ogni monitor e scrivania, scala dei monitor, cartelle del Finder e schede del browser. Se il nome esiste già, aggiorno quella scena.\n\nPer vedere tutte le finestre passo da ogni scrivania: per qualche secondo non toccare mouse e tastiera."
         alert.accessoryView = container
         alert.addButton(withTitle: "Salva")
         alert.addButton(withTitle: "Annulla")
@@ -296,12 +309,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let alert = NSAlert()
         alert.messageText = "Diagnostica di Ormeggio"
         alert.informativeText = text
+        alert.addButton(withTitle: "Salva il file per l'assistenza…")
         alert.addButton(withTitle: "Copia negli appunti")
         alert.addButton(withTitle: "Chiudi")
         NSApp.activate()
-        if alert.runModal() == .alertFirstButtonReturn {
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            exportReport()
+        case .alertSecondButtonReturn:
             NSPasteboard.general.clearContents()
             _ = NSPasteboard.general.setString(text, forType: .string)
+        default:
+            break
+        }
+    }
+
+    /// Salva un file di testo con diagnostica, scene e registro, da mandare all'assistenza.
+    @objc private func exportReport() {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd-HHmm"
+        let panel = NSSavePanel()
+        panel.title = "Salva diagnostica"
+        panel.message = "Il file contiene la diagnostica, l'elenco delle scene e il registro. Non contiene gli indirizzi delle schede."
+        panel.nameFieldStringValue = "Ormeggio-diagnostica-\(formatter.string(from: Date())).txt"
+        panel.directoryURL = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first
+        NSApp.activate()
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try engine.supportReport().write(to: url, atomically: true, encoding: .utf8)
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        } catch {
+            showMessage("Diagnostica", "Non riesco a salvare il file: \(error.localizedDescription)")
         }
     }
 

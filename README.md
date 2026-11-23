@@ -2,13 +2,13 @@
 
 App per la barra dei menu del Mac che salva e richiama **scene**. Una scena è il Mac sistemato come ti serve: app aperte, finestre su ogni monitor e su ogni scrivania, scala dei monitor, cartelle del Finder, schede del browser. La salvi con un nome (Ufficio 1, Ufficio 2, Mac da solo) e quando la richiami Ormeggio rimette tutto a posto.
 
-Versione 0.2. Requisiti completi nel documento "Requisiti app layout monitor per Mac".
+Versione 0.2.1. Requisiti completi nel documento "Requisiti app layout monitor per Mac".
 
 ## Per chi la usa
 
 ### Installare
 
-1. Apri `Ormeggio-0.2.0.dmg` e trascina **Ormeggio** su **Applicazioni**.
+1. Apri `Ormeggio-0.2.1.dmg` e trascina **Ormeggio** su **Applicazioni**.
 2. Apri Ormeggio da Applicazioni. Se macOS dice che non può verificare lo sviluppatore: Impostazioni di Sistema > Privacy e sicurezza, in fondo premi **Apri comunque**.
 3. Nella finestra di benvenuto premi **Continua** e attiva Ormeggio nell'elenco **Accessibilità**.
 
@@ -23,6 +23,10 @@ L'icona di Ormeggio compare nella barra in alto, vicino all'orologio.
 Mentre salva o richiama una scena Ormeggio passa da una scrivania all'altra: per qualche secondo non toccare mouse e tastiera.
 
 La prima volta che salvi con Finder, Chrome o Safari aperti, macOS chiede se Ormeggio può controllarli: rispondi OK. Serve per sapere quali cartelle e schede sono aperte.
+
+### Se qualcosa non va
+
+Icona di Ormeggio > Impostazioni > **Salva diagnostica per l'assistenza…**. Crea un file di testo con la diagnostica, l'elenco delle scene e il registro delle ultime operazioni, senza gli indirizzi delle schede. Mandalo a chi ti assiste.
 
 ### Disinstallare
 

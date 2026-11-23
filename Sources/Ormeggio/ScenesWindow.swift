@@ -34,6 +34,8 @@ final class ScenesModel: ObservableObject {
     let onSaveRequested: @MainActor () -> Void
     @Published var scenes: [SavedScene] = []
     @Published var activeID: UUID?
+    @Published var monitors: String = ""
+    @Published var fingerprint: String = ""
     private var observer: NSObjectProtocol?
 
     init(engine: Engine, onSaveRequested: @escaping @MainActor () -> Void) {
@@ -49,6 +51,11 @@ final class ScenesModel: ObservableObject {
     func reload() {
         scenes = engine.store.scenes.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
         activeID = engine.activeSceneID
+        let displays = DisplayManager.activeDisplays()
+        monitors = displays.map { display in
+            display.mode.map { "\(display.name) (\($0.label))" } ?? display.name
+        }.joined(separator: " + ")
+        fingerprint = DisplayManager.fingerprint(displays)
     }
 
     func recall(_ scene: SavedScene) {
@@ -112,6 +119,9 @@ struct ScenesView: View {
                         .font(.title2.bold())
                     Text("Sistema il Mac come ti serve, salva la scena e richiamala quando vuoi.")
                         .foregroundStyle(.secondary)
+                    Label("Ora: \(model.monitors)", systemImage: "display.2")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
                 }
                 Spacer()
                 Button("Salva scena…") { model.saveNew() }
@@ -156,8 +166,17 @@ struct SceneRow: View {
                 .foregroundStyle(isActive ? Color.accentColor : Color.secondary)
                 .font(.title3)
             VStack(alignment: .leading, spacing: 3) {
-                Text(scene.name)
-                    .font(.headline)
+                HStack(spacing: 6) {
+                    Text(scene.name)
+                        .font(.headline)
+                    if scene.fingerprint == model.fingerprint {
+                        Text("questi monitor")
+                            .font(.caption2.bold())
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.accentColor.opacity(0.15), in: Capsule())
+                    }
+                }
                 Text(model.summary(of: scene))
                     .font(.caption)
                     .foregroundStyle(.secondary)
