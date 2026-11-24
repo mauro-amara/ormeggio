@@ -33,6 +33,10 @@ enum Input {
     static func mouse(_ type: CGEventType, at point: CGPoint) {
         let source = CGEventSource(stateID: .hidSystemState)
         guard let event = CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: point, mouseButton: .left) else { return }
+        // Un clic vero ha il numero di clic: senza, macOS può non trattarlo come presa della finestra.
+        if type == .leftMouseDown || type == .leftMouseUp || type == .leftMouseDragged {
+            event.setIntegerValueField(.mouseEventClickState, value: 1)
+        }
         event.post(tap: .cghidEventTap)
     }
 

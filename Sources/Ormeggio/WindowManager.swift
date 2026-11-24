@@ -208,6 +208,16 @@ enum WindowManager {
         return !blocked.contains(role)
     }
 
+    /// Ruolo dell'elemento nel punto (per il registro).
+    static func roleAt(_ point: CGPoint) -> String {
+        var found: AXUIElement?
+        guard AXUIElementCopyElementAtPosition(AXUIElementCreateSystemWide(), Float(point.x), Float(point.y), &found) == .success,
+              let element = found else { return "niente" }
+        var owner: pid_t = 0
+        _ = AXUIElementGetPid(element, &owner)
+        return (stringAttribute(element, kAXRoleAttribute) ?? "?") + " pid \(owner)"
+    }
+
     /// Chiede alle app fatte con Chromium o Electron (Chrome, Slack, Claude...) di mostrare
     /// i loro elementi all'Accessibilità, così si vede dove sono pulsanti e schede.
     static func enableFullAccessibility(pid: pid_t) {

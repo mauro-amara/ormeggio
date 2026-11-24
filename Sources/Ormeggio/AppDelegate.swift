@@ -27,6 +27,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         engine.onStateChange = { [weak self] in self?.updateIcon() }
         engine.onActivity = { report in HUD.shared.show(report) }
+        HUD.shared.diagnostics = { [weak self] in self?.engine.supportReport() ?? "" }
         engine.askChromeProfiles = { [weak self] titles, profiles in
             self?.askChromeProfiles(titles: titles, profiles: profiles) ?? []
         }

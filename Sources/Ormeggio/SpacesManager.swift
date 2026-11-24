@@ -136,9 +136,14 @@ enum SpacesManager {
         await Input.pause(0.4)
         let start = WindowManager.frame(of: window.element) ?? window.frame
 
+        Log.write("Sposto \"\(window.title)\" dalla scrivania \(current + 1) alla \(targetIndex + 1) di \(display.name), finestra a \(Int(start.minX)),\(Int(start.minY)) \(Int(start.width))x\(Int(start.height))")
         var held: CGPoint?
         for point in WindowManager.grabCandidates(of: window, frame: start) {
-            guard start.contains(point), WindowManager.isDraggableArea(point, pid: window.pid) else { continue }
+            let role = WindowManager.roleAt(point)
+            guard start.contains(point), WindowManager.isDraggableArea(point, pid: window.pid) else {
+                Log.write("   punto \(Int(point.x)),\(Int(point.y)) scartato (\(role))")
+                continue
+            }
             Input.moveMouse(to: point)
             await Input.pause(0.1)
             Input.mouse(.leftMouseDown, at: point)
@@ -148,7 +153,9 @@ enum SpacesManager {
             let moved = CGPoint(x: point.x + 6, y: point.y)
             Input.mouse(.leftMouseDragged, at: moved)
             await Input.pause(0.25)
-            if let now = WindowManager.frame(of: window.element), abs(now.minX - start.minX) >= 2 {
+            let now = WindowManager.frame(of: window.element)
+            Log.write("   punto \(Int(point.x)),\(Int(point.y)) (\(role)): finestra " + (now.map { "a \(Int($0.minX)),\(Int($0.minY))" } ?? "non leggibile"))
+            if let now, abs(now.minX - start.minX) >= 2 {
                 held = moved
                 break
             }
@@ -170,8 +177,10 @@ enum SpacesManager {
 
         guard let windowID = window.windowID else { return true }
         let targetSpace = layout.spaceIDs[targetIndex]
-        let moved = spaceIDs(forWindow: windowID).contains(targetSpace)
-        if !moved { Log.write("Finestra \"\(window.title)\" non spostata sulla scrivania \(targetIndex + 1)") }
+        let spaces = spaceIDs(forWindow: windowID)
+        let moved = spaces.contains(targetSpace)
+        let nowIndex = layouts(for: displays)[display.id]?.currentIndex.map { $0 + 1 } ?? 0
+        Log.write("   dopo il cambio: scrivania visibile \(nowIndex), finestra negli spazi \(spaces), atteso \(targetSpace): " + (moved ? "spostata" : "NON spostata"))
         return moved
     }
 

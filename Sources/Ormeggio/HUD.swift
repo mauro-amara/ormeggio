@@ -47,13 +47,23 @@ final class HUD {
 
     private var panel: NSPanel?
     private var hideTask: Task<Void, Never>?
+    /// Testo della diagnostica, per il pulsante che la copia quando qualcosa non va.
+    var diagnostics: (@MainActor () -> String)?
 
     func show(_ report: ActivityReport) {
         hideTask?.cancel()
         let panel = self.panel ?? makePanel()
         self.panel = panel
 
-        let content = HUDView(report: report) { [weak self] in self?.hide() }
+        var copy: (@MainActor () -> Void)?
+        if report.kind == .warning || report.kind == .failure, let diagnostics {
+            copy = {
+                let pasteboard = NSPasteboard.general
+                pasteboard.clearContents()
+                pasteboard.setString(diagnostics(), forType: .string)
+            }
+        }
+        let content = HUDView(report: report, onClose: { [weak self] in self?.hide() }, onCopyDiagnostics: copy)
         let hosting = FirstClickHostingView(rootView: content)
         let size = hosting.fittingSize
 
@@ -141,6 +151,8 @@ final class HUD {
 private struct HUDView: View {
     let report: ActivityReport
     let onClose: () -> Void
+    let onCopyDiagnostics: (@MainActor () -> Void)?
+    @State private var copied = false
 
     private var tint: Color {
         switch report.kind {
@@ -229,6 +241,17 @@ private struct HUDView: View {
                         HUDLine(text: line.text, symbol: "info.circle.fill", color: .secondary)
                     }
                 }
+            }
+            if let onCopyDiagnostics {
+                Button {
+                    onCopyDiagnostics()
+                    copied = true
+                } label: {
+                    Label(copied ? "Copiata: incollala nella chat con Claude" : "Copia la diagnostica per Claude",
+                          systemImage: copied ? "checkmark" : "doc.on.doc")
+                        .font(.callout)
+                }
+                .buttonStyle(.link)
             }
             if let title = report.actionTitle, let action = report.action {
                 Button {

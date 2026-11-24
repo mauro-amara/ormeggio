@@ -132,9 +132,14 @@ final class Engine {
 
     private func autoCheck(reason: String) async {
         let fingerprint = DisplayManager.fingerprint(DisplayManager.activeDisplays())
-        let changed = fingerprint != lastFingerprint
-        lastFingerprint = fingerprint
-        guard changed, !isBusy else {
+        // All'avvio (anche dopo un aggiornamento) prendo solo nota dei monitor: non sposto niente.
+        guard let previous = lastFingerprint else {
+            lastFingerprint = fingerprint
+            if activeSceneID == nil, let scene = store.autoScene(for: fingerprint) { activeSceneID = scene.id }
+            refreshState()
+            return
+        }
+        guard fingerprint != previous, !isBusy else {
             refreshState()
             return
         }
@@ -142,12 +147,53 @@ final class Engine {
             activeSceneID = nil
         }
         refreshState()
-        guard autoApplyEnabled, let scene = store.autoScene(for: fingerprint) else {
+        guard autoApplyEnabled, store.autoScene(for: fingerprint) != nil else {
+            lastFingerprint = fingerprint
             Log.write("Monitor cambiati (\(reason)): nessuna scena automatica per questi monitor")
+            return
+        }
+        onActivity?(ActivityReport(
+            kind: .working,
+            title: "Monitor collegati: aspetto che macOS finisca",
+            subtitle: "Poi rimetto tutto come nella scena"
+        ))
+        // Se arrivano altri cambiamenti, questo controllo viene annullato e ne parte uno nuovo.
+        guard await waitForStableDisplays(), !Task.isCancelled else { return }
+        let settled = DisplayManager.fingerprint(DisplayManager.activeDisplays())
+        lastFingerprint = settled
+        guard let scene = store.autoScene(for: settled) else {
+            Log.write("Monitor cambiati (\(reason)): a monitor fermi nessuna scena automatica")
+            onActivity?(ActivityReport(kind: .success, title: "Nessuna scena per questi monitor", subtitle: nil))
             return
         }
         Log.write("Richiamo automatico di \"\(scene.name)\" (\(reason))")
         await apply(scene)
+    }
+
+    /// Dopo un cambio di monitor macOS impiega diversi secondi a rimettere le scrivanie sul monitor giusto.
+    /// Aspetto che monitor e numero di scrivanie restino uguali per 4 secondi di fila, al massimo 40 secondi.
+    /// Restituisce false se nel frattempo il controllo è stato annullato.
+    private func waitForStableDisplays() async -> Bool {
+        var last = ""
+        var stableSince = Date()
+        let started = Date()
+        while Date().timeIntervalSince(started) < 40 {
+            if Task.isCancelled { return false }
+            let displays = DisplayManager.activeDisplays()
+            let layouts = SpacesManager.layouts(for: displays)
+            let counts = displays.map { "\($0.key):\(layouts[$0.id]?.count ?? -1)" }.joined(separator: ",")
+            let snapshot = DisplayManager.fingerprint(displays) + "|" + counts
+            if snapshot != last {
+                last = snapshot
+                stableSince = Date()
+            } else if Date().timeIntervalSince(stableSince) >= 4 {
+                Log.write("Monitor fermi dopo \(Int(Date().timeIntervalSince(started))) secondi: \(counts)")
+                return true
+            }
+            await Input.pause(1)
+        }
+        Log.write("Monitor ancora in movimento dopo 40 secondi: procedo")
+        return !Task.isCancelled
     }
 
     /// Quando si apre un'app, mette le sue finestre dove le vuole la scena attiva.
