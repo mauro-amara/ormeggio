@@ -195,32 +195,6 @@ enum BrowserBridge {
         return Set(active)
     }
 
-    static func detectProfile(of window: LiveWindow, profiles: [ChromeProfile]) -> String? {
-        guard profiles.count > 1 else { return profiles.first?.directory }
-        // Chrome espone l'albero completo dell'Accessibilità solo se glielo si chiede.
-        let app = AXUIElementCreateApplication(window.pid)
-        _ = AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
-
-        var queue: [AXUIElement] = [window.element]
-        var visited = 0
-        var best: ChromeProfile?
-        while !queue.isEmpty, visited < 600 {
-            let element = queue.removeFirst()
-            visited += 1
-            let role = WindowManager.stringAttribute(element, kAXRoleAttribute)
-            if role == kAXButtonRole || role == kAXPopUpButtonRole || role == "AXMenuButton" {
-                let texts = [kAXTitleAttribute, kAXDescriptionAttribute, kAXHelpAttribute]
-                    .compactMap { WindowManager.stringAttribute(element, $0) }
-                for profile in profiles where texts.contains(where: { $0.localizedCaseInsensitiveContains(profile.name) }) {
-                    if best == nil || profile.name.count > best!.name.count { best = profile }
-                }
-            }
-            if role == "AXWebArea" { continue }
-            queue.append(contentsOf: WindowManager.children(of: element))
-        }
-        return best?.directory
-    }
-
     // MARK: Zoom di Chrome
 
     /// Livelli di zoom dei siti salvati nelle preferenze del profilo Chrome.

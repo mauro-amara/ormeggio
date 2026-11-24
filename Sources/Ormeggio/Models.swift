@@ -95,3 +95,10 @@ struct SavedScene: Codable, Identifiable {
     /// Icona scelta dall'utente (nome di un simbolo di sistema).
     var icon: String?
 }
+
+extension Array {
+    /// L'elemento in quella posizione, o nil se la posizione non esiste.
+    subscript(safe index: Int) -> Element? {
+        indices.contains(index) ? self[index] : nil
+    }
+}

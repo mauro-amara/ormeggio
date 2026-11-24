@@ -1306,10 +1306,17 @@ final class Engine {
             let name = "\(assignments[index].saved.appName) \"\(assignments[index].saved.title)\""
             let frame = targetFrame(for: assignments[index].saved, on: target, scene: scene)
 
+            let targetSpace = wanted.flatMap { desktop in SpacesManager.layouts(for: displays)[target.id]?.spaceIDs[safe: desktop - 1] }
             if !sameDisplay {
-                if let wanted { await SpacesManager.switchDesktop(on: target, to: wanted - 1, displays: displays) }
+                if let wanted, !(await SpacesManager.switchDesktop(on: target, to: wanted - 1, displays: displays)) {
+                    Log.write("\(name): non riesco a portare \(target.name) sulla scrivania \(wanted)")
+                }
                 WindowManager.setFrame(live.element, to: frame)
-                await Input.pause(0.4)
+                if let id = assignments[index].tracked.windowID, let targetSpace {
+                    _ = await SpacesManager.waitForWindow(id, onSpace: targetSpace)
+                } else {
+                    await Input.pause(0.4)
+                }
                 Log.write("\(name): portata su \(target.name)" + (wanted.map { ", scrivania \($0)" } ?? ""))
             } else if let wanted, let other = displays.first(where: { $0.id != target.id }) {
                 // Passaggio per l'altro monitor.
@@ -1317,12 +1324,16 @@ final class Engine {
                 let parking = CGRect(x: other.bounds.midX - size.width / 2, y: other.bounds.midY - size.height / 2,
                                      width: size.width, height: size.height)
                 WindowManager.setFrame(live.element, to: parking)
-                await Input.pause(0.4)
-                await SpacesManager.switchDesktop(on: target, to: wanted - 1, displays: displays)
-                await Input.pause(0.3)
+                await Input.pause(0.5)
+                let switched = await SpacesManager.switchDesktop(on: target, to: wanted - 1, displays: displays)
+                await Input.pause(0.2)
                 WindowManager.setFrame(live.element, to: frame)
-                await Input.pause(0.4)
-                Log.write("\(name): passata per \(other.name) e rimessa su \(target.name), scrivania \(wanted)")
+                if let id = assignments[index].tracked.windowID, let targetSpace {
+                    _ = await SpacesManager.waitForWindow(id, onSpace: targetSpace)
+                } else {
+                    await Input.pause(0.5)
+                }
+                Log.write("\(name): passata per \(other.name) e rimessa su \(target.name), scrivania \(wanted)" + (switched ? "" : " (il cambio di scrivania non ha risposto)"))
             } else if let wanted {
                 _ = await SpacesManager.moveWindow(live, on: target, to: wanted - 1, displays: displays)
             }

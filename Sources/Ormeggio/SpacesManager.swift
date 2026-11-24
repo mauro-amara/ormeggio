@@ -105,22 +105,54 @@ enum SpacesManager {
     // MARK: Spostarsi tra le scrivanie
 
     /// Porta il monitor sulla scrivania indicata (da 0) con ctrl + freccia.
+    /// Porta un monitor sulla scrivania indicata (da 0), un passo alla volta con ctrl + freccia.
+    /// Dopo ogni passo aspetta che macOS confermi il cambio: leggere la posizione durante l'animazione
+    /// darebbe un numero vecchio e farebbe sbagliare il conto dei passi.
     @discardableResult
     static func switchDesktop(on display: LiveDisplay, to targetIndex: Int, displays: [LiveDisplay]) async -> Bool {
-        for _ in 0..<3 {
-            guard let layout = layouts(for: displays)[display.id], let current = layout.currentIndex,
-                  layout.spaceIDs.indices.contains(targetIndex) else { return false }
+        guard layouts(for: displays)[display.id]?.spaceIDs.indices.contains(targetIndex) == true else { return false }
+        let center = CGPoint(x: display.bounds.midX, y: display.bounds.midY)
+        Input.moveMouse(to: center)
+        await Input.pause(0.15)
+        var silent = 0
+        for _ in 0..<12 {
+            guard let current = layouts(for: displays)[display.id]?.currentIndex else { return false }
             if current == targetIndex { return true }
-            Input.moveMouse(to: CGPoint(x: display.bounds.midX, y: display.bounds.midY))
-            await Input.pause(0.15)
-            let steps = targetIndex - current
-            for _ in 0..<abs(steps) {
-                Input.pressDesktopArrow(right: steps > 0)
-                await Input.pause(0.45)
+            Input.pressDesktopArrow(right: targetIndex > current)
+            var changed = false
+            for _ in 0..<20 {
+                await Input.pause(0.1)
+                if layouts(for: displays)[display.id]?.currentIndex != current {
+                    changed = true
+                    break
+                }
             }
-            await Input.pause(0.3)
+            if changed {
+                // Lascio finire l'animazione prima del passo successivo.
+                await Input.pause(0.3)
+            } else {
+                silent += 1
+                Log.write("Cambio scrivania su \(display.name): macOS non ha risposto (\(silent))")
+                if silent >= 3 { break }
+                Input.moveMouse(to: center)
+                await Input.pause(0.3)
+            }
         }
-        return layouts(for: displays)[display.id]?.currentIndex == targetIndex
+        let reached = layouts(for: displays)[display.id]?.currentIndex == targetIndex
+        if !reached {
+            let now = layouts(for: displays)[display.id]?.currentIndex.map { "\($0 + 1)" } ?? "?"
+            Log.write("Cambio scrivania su \(display.name): volevo la \(targetIndex + 1), sono sulla \(now)")
+        }
+        return reached
+    }
+
+    /// Aspetta (al massimo 2 secondi) che la finestra risulti sulla scrivania indicata.
+    static func waitForWindow(_ windowID: CGWindowID, onSpace spaceID: Int) async -> Bool {
+        for _ in 0..<20 {
+            if spaceIDs(forWindow: windowID).contains(spaceID) { return true }
+            await Input.pause(0.1)
+        }
+        return false
     }
 
     /// Sposta una finestra dalla scrivania visibile a un'altra dello stesso monitor, quando c'è un monitor solo:
