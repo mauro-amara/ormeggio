@@ -1450,6 +1450,7 @@ final class Engine {
         lines.append("Ormeggio \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?")")
         lines.append("macOS: \(ProcessInfo.processInfo.operatingSystemVersionString)")
         lines.append("Accessibilità: \(WindowManager.isTrusted(prompt: false) ? "concessa" : "NON concessa")")
+        lines.append("Notifiche: \(Notifier.shared.statusText)")
         lines.append("Automazione Chrome: \(BrowserBridge.automationStatus(bundleID: BrowserBridge.chromeID)) · Finder: \(BrowserBridge.automationStatus(bundleID: FinderBridge.bundleID))")
         let sessions = ChromeSession.windows(profiles: BrowserBridge.chromeProfiles())
         lines.append("Chrome dai file di sessione: \(sessions.count) finestre, \(sessions.reduce(0) { $0 + $1.tabs.count }) schede (" + Set(sessions.map(\.profile)).sorted().joined(separator: ", ") + ")")

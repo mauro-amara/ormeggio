@@ -71,8 +71,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 defaults.set(info.version, forKey: "lastUpdateVersion")
             }
             self.notifyUpdate()
+            await self.notifier.refreshStatus()
             if WindowManager.isTrusted(prompt: false) {
-                self.showWhatsNew()
+                self.showWhatsNew(afterUpdate: true)
             } else {
                 self.repairPermissionAutomatically()
             }
@@ -99,6 +100,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// Le novità dell'ultima versione installata, nel riquadro: una per riga.
     @objc private func showWhatsNew() {
+        showWhatsNew(afterUpdate: false)
+    }
+
+    private var notifier: Notifier { Notifier.shared }
+
+    private func showWhatsNew(afterUpdate: Bool) {
         let defaults = UserDefaults.standard
         let version = defaults.string(forKey: "lastUpdateVersion") ?? updater.currentVersion
         let lines = (defaults.string(forKey: "lastUpdateNotes") ?? "")
@@ -107,12 +114,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             .filter { !$0.isEmpty }
         let summary = lines.count > 1 ? lines[0] : nil
         let items = lines.count > 1 ? Array(lines.dropFirst()) : lines
-        HUD.shared.show(ActivityReport(
+        var report = ActivityReport(
             kind: .success,
             title: "Ormeggio aggiornato alla versione \(version)",
             subtitle: summary ?? (items.isEmpty ? "Le tue scene sono al loro posto" : "Ecco cosa cambia"),
             lines: items.map { ActivityReport.Line(text: $0) }
-        ))
+        )
+        // Se macOS blocca le notifiche di Ormeggio, lo dico e porto la persona all'interruttore.
+        if afterUpdate, !notifier.isAllowed {
+            report.lines.append(.init(text: "Le notifiche di Ormeggio sono spente: accendile per sapere di ogni aggiornamento.", tone: .info))
+            report.actionTitle = "Accendi le notifiche"
+            report.action = { Notifier.openSettings() }
+        }
+        HUD.shared.show(report)
     }
 
     /// Installa da sola la versione nuova, appena Ormeggio non sta spostando finestre.

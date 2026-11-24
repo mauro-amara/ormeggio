@@ -10,9 +10,45 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     /// Chiamata quando la persona clicca la notifica di un aggiornamento.
     var onOpenUpdate: (@MainActor () -> Void)?
 
-    /// Va chiamata appena l'app parte, così il clic sulla notifica arriva sempre a Ormeggio.
+    /// Stato del permesso, come lo vede macOS. Finisce nella diagnostica.
+    private(set) var status: UNAuthorizationStatus = .notDetermined
+
+    var statusText: String {
+        switch status {
+        case .authorized, .provisional: return "consentite"
+        case .denied: return "SPENTE in Impostazioni di Sistema"
+        case .notDetermined: return "permesso non ancora dato"
+        @unknown default: return "stato sconosciuto"
+        }
+    }
+
+    var isAllowed: Bool { status == .authorized || status == .provisional }
+
+    /// Va chiamata appena l'app parte: il clic sulla notifica arriva sempre a Ormeggio,
+    /// e macOS chiede subito il permesso, così la notifica del prossimo aggiornamento non si perde.
     func start() {
-        UNUserNotificationCenter.current().delegate = self
+        let center = UNUserNotificationCenter.current()
+        center.delegate = self
+        Task { @MainActor in
+            await self.refreshStatus()
+            if self.status == .notDetermined {
+                _ = try? await center.requestAuthorization(options: [.alert, .sound])
+                await self.refreshStatus()
+            }
+            Log.write("Notifiche: \(self.statusText)")
+        }
+    }
+
+    func refreshStatus() async {
+        status = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
+    }
+
+    /// Apre Impostazioni di Sistema sulle notifiche di Ormeggio.
+    static func openSettings() {
+        let id = Bundle.main.bundleIdentifier ?? "com.sparkfabrik.ormeggio"
+        if let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=\(id)") {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     /// Manda la notifica. La prima volta macOS chiede se Ormeggio può mandarne: basta "Consenti".
@@ -27,6 +63,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
                 Notifier.systemNotification(title: title, body: body)
                 return
             }
+            await self.refreshStatus()
             guard granted else {
                 Log.write("Notifiche spente per Ormeggio in Impostazioni di Sistema")
                 return
