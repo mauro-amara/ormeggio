@@ -79,6 +79,8 @@ Icona di Ormeggio > Impostazioni > **Disinstalla Ormeggio…**. Toglie l'avvio a
 | Profili di Chrome | Li riconosce dal pulsante del profilo, altrimenti li chiede al salvataggio |
 | Documenti | Li riapre se l'app li dichiara |
 | Impostazioni di Sistema | Riapre la pagina che era aperta |
+| Finestre fuori dalla scena | Sulle scrivanie della scena le riduce nel Dock, tranne le riunioni (si spegne da Impostazioni) |
+| Zoom di Chrome | Lo rimette sito per sito senza riaprire le app web (WhatsApp Web resta collegato) |
 
 ## Limiti
 

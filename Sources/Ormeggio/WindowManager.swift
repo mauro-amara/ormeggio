@@ -133,13 +133,23 @@ enum WindowManager {
     /// con questa funzione privata (la usano anche app come AltTab) si raggiungono anche le altre,
     /// senza cambiare scrivania.
     static func windowsOnAllDesktops(pid: pid_t) -> [CGWindowID: (title: String, document: String?)] {
+        var result: [CGWindowID: (title: String, document: String?)] = [:]
+        for (id, element) in elementsOnAllDesktops(pid: pid) {
+            result[id] = (stringAttribute(element, kAXTitleAttribute) ?? "", stringAttribute(element, kAXDocumentAttribute))
+        }
+        return result
+    }
+
+    /// Le finestre standard di un'app su tutte le scrivanie, come elementi di Accessibilità:
+    /// servono per agire su una finestra (per esempio ridurla nel Dock) senza cambiare scrivania.
+    static func elementsOnAllDesktops(pid: pid_t) -> [CGWindowID: AXUIElement] {
         guard let pointer = remoteTokenPointer else { return [:] }
         let create = unsafeBitCast(pointer, to: CreateWithRemoteTokenFn.self)
         var token = Data(count: 20)
         token.replaceSubrange(0..<4, with: withUnsafeBytes(of: pid) { Data($0) })
         token.replaceSubrange(4..<8, with: withUnsafeBytes(of: Int32(0)) { Data($0) })
         token.replaceSubrange(8..<12, with: withUnsafeBytes(of: Int32(0x636f636f)) { Data($0) })
-        var result: [CGWindowID: (title: String, document: String?)] = [:]
+        var result: [CGWindowID: AXUIElement] = [:]
         let started = Date()
         for elementID in UInt64(0)..<UInt64(1000) {
             if Date().timeIntervalSince(started) > 1.5 { break }
@@ -148,7 +158,8 @@ enum WindowManager {
             _ = AXUIElementSetMessagingTimeout(element, 0.1)
             guard stringAttribute(element, kAXSubroleAttribute) == kAXStandardWindowSubrole,
                   let id = windowID(of: element) else { continue }
-            result[id] = (stringAttribute(element, kAXTitleAttribute) ?? "", stringAttribute(element, kAXDocumentAttribute))
+            _ = AXUIElementSetMessagingTimeout(element, 2.0)
+            result[id] = element
         }
         return result
     }

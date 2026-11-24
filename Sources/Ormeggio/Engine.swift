@@ -70,6 +70,12 @@ final class Engine {
         set { UserDefaults.standard.set(newValue, forKey: "autoApply") }
     }
 
+    /// Riduce nel Dock le finestre che non fanno parte della scena, sulle scrivanie della scena.
+    var minimizeOthers: Bool {
+        get { UserDefaults.standard.object(forKey: "minimizeOthers") as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: "minimizeOthers") }
+    }
+
     /// Gestisce le scrivanie (le crea, le toglie, ci sposta le finestre).
     var manageSpaces: Bool {
         get { UserDefaults.standard.object(forKey: "manageSpaces") as? Bool ?? true }
@@ -829,14 +835,30 @@ final class Engine {
         await placeFrames(&assignments, scene: scene, displays: displays)
 
         // 9b. Schede di Chrome che mancano nelle finestre già aperte: le apro in quella finestra.
+        //     Una scheda già aperta in un'altra finestra dello stesso profilo non la riapro:
+        //     per siti come WhatsApp Web una seconda copia stacca la prima.
+        var openPages: [String: Set<String>] = [:]
+        var openHosts: [String: Set<String>] = [:]
+        for window in tracked where window.bundleID == BrowserBridge.chromeID {
+            let profile = window.chromeProfile ?? "?"
+            for address in window.tabs ?? [] {
+                openPages[profile, default: []].insert(Engine.pageKey(address))
+                if let host = BrowserBridge.host(of: address) { openHosts[profile, default: []].insert(host.lowercased()) }
+            }
+        }
         var tabsReopened: [String] = []
         for index in assignments.indices where assignments[index].saved.bundleID == BrowserBridge.chromeID {
             let saved = assignments[index].saved
             guard let openTabs = assignments[index].tracked.tabs else { continue }
-            let present = Set(openTabs.map(Engine.pageKey))
+            let profile = saved.chromeProfile ?? assignments[index].tracked.chromeProfile ?? "?"
+            let present = Set(openTabs.map(Engine.pageKey)).union(openPages[profile] ?? [])
             var seen = Set<String>()
             let missingTabs = (saved.tabs ?? []).filter { address in
                 let key = Engine.pageKey(address)
+                if let host = BrowserBridge.host(of: address)?.lowercased(), Engine.singleSessionHosts.contains(host),
+                   openHosts[profile]?.contains(host) == true {
+                    return false
+                }
                 return !BrowserBridge.isMeeting(address) && !present.contains(key) && seen.insert(key).inserted
             }
             guard !missingTabs.isEmpty,
@@ -869,6 +891,15 @@ final class Engine {
             guard let live = assignment.tracked.live else { continue }
             if assignment.saved.fullScreen == true, !assignment.tracked.isFullScreen {
                 WindowManager.setFullScreen(live.element, true)
+            }
+        }
+
+        // 11b. Finestre che non fanno parte della scena, sulle scrivanie dove la scena ha finestre:
+        //      le riduco nel Dock, così su ogni scrivania restano su solo quelle della scena.
+        if minimizeOthers {
+            let reduced = minimizeOutsiders(assignments, displays: displays)
+            if !reduced.isEmpty {
+                notes.append(.init(text: "Ho ridotto nel Dock le finestre fuori dalla scena: " + Engine.countedList(reduced)))
             }
         }
 
@@ -1020,6 +1051,55 @@ final class Engine {
         return unique.count > 3 ? "\(shown) e altri \(unique.count - 3)" : shown
     }
 
+    /// Siti che reggono una sola copia aperta: aprirne una seconda stacca la prima.
+    static let singleSessionHosts: Set<String> = ["web.whatsapp.com", "web.telegram.org", "messages.google.com"]
+
+    /// App di riunione: le loro finestre non le riduco mai nel Dock.
+    static let meetingApps: Set<String> = [
+        "us.zoom.xos", "com.microsoft.teams", "com.microsoft.teams2", "com.apple.FaceTime",
+        "Cisco-Systems.Spark", "com.cisco.webexmeetingsapp", "com.webex.meetingmanager"
+    ]
+
+    /// Riduce nel Dock le finestre aperte che non fanno parte della scena, ma solo sulle scrivanie
+    /// (monitor e numero di scrivania) dove la scena ha almeno una finestra. Le riunioni restano su.
+    /// Restituisce i nomi delle app delle finestre ridotte.
+    private func minimizeOutsiders(_ assignments: [Assignment], displays: [LiveDisplay]) -> [String] {
+        var sceneDesktops = Set<String>()
+        var sceneIDs = Set<CGWindowID>()
+        for assignment in assignments {
+            if let id = assignment.tracked.windowID { sceneIDs.insert(id) }
+            if let desktop = assignment.saved.desktop { sceneDesktops.insert("\(assignment.saved.displayKey)#\(desktop)") }
+        }
+        guard !sceneDesktops.isEmpty else { return [] }
+        let profiles = BrowserBridge.chromeProfiles()
+        var current = inventory(displays: displays, profiles: profiles)
+        Engine.attachChromeTabs(&current, profiles: profiles)
+        var elements: [pid_t: [CGWindowID: AXUIElement]] = [:]
+        var reduced: [String] = []
+        for window in current {
+            guard let id = window.windowID, !sceneIDs.contains(id),
+                  !window.isMinimized, !window.isFullScreen,
+                  let desktop = window.desktop, sceneDesktops.contains("\(window.displayKey)#\(desktop)") else { continue }
+            if Engine.meetingApps.contains(window.bundleID) || (window.tabs ?? []).contains(where: BrowserBridge.isMeeting) {
+                Log.write("Fuori dalla scena ma lasciata su (riunione): \(window.appName) \"\(window.title)\"")
+                continue
+            }
+            var element = window.live?.element
+            if element == nil {
+                if elements[window.pid] == nil { elements[window.pid] = WindowManager.elementsOnAllDesktops(pid: window.pid) }
+                element = elements[window.pid]?[id]
+            }
+            guard let element else {
+                Log.write("Fuori dalla scena, non raggiungibile: \(window.appName) \"\(window.title)\"")
+                continue
+            }
+            WindowManager.setMinimized(element, true)
+            reduced.append(window.appName)
+            Log.write("Ridotta nel Dock perché fuori dalla scena: \(window.appName) \"\(window.title)\" (\(window.displayKey), scrivania \(desktop))")
+        }
+        return reduced
+    }
+
     /// Rimette lo zoom di Chrome dei siti della scena, dove è diverso da quello che Chrome ha salvato.
     /// Lo zoom di Chrome vale per sito e per profilo: per cambiarlo apro un momento una finestra del sito
     /// nel profilo giusto, sistemo lo zoom con i comandi del menu Vista e la richiudo.
@@ -1034,11 +1114,10 @@ final class Engine {
             for (host, level) in hosts.sorted(by: { $0.key < $1.key }) {
                 let now = current.hosts[host] ?? current.defaultLevel
                 guard abs(now - level) > 0.01 else { continue }
-                // Una pagina di quel sito salvata nella scena; per le riunioni la pagina principale del sito.
-                let pages = scene.windows
-                    .filter { $0.bundleID == BrowserBridge.chromeID && ($0.chromeProfile ?? profile) == profile }
-                    .flatMap { $0.tabs ?? [] }
-                let address = pages.first { BrowserBridge.host(of: $0) == host && !BrowserBridge.isMeeting($0) } ?? "https://\(host)/"
+                // Una pagina di solo testo dello stesso sito (robots.txt): lo zoom di Chrome vale per tutto il sito,
+                // e così non apro una seconda copia dell'app web. Aprire di nuovo WhatsApp Web, per esempio,
+                // staccherebbe quella già aperta.
+                let address = "https://\(host)/robots.txt"
                 let steps = BrowserBridge.chromeSteps(from: current.defaultLevel, to: level)
                 let done = await zoomInTemporaryWindow(address: address, profile: profile, steps: steps,
                                                        pid: chrome.processIdentifier, profiles: profiles)

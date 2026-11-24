@@ -226,8 +226,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         HUD.shared.show(ActivityReport(
             kind: .working,
             title: "Invio la segnalazione…",
-            subtitle: "Si apre Gmail e la mail parte da sola: non toccare la tastiera"
+            subtitle: ReportSender.hasDirectChannel ? "Ci vuole un secondo" : "Si apre Gmail e la mail parte da sola: non toccare la tastiera"
         ))
+        if ReportSender.hasDirectChannel {
+            let report = engine.supportReport(maxCharacters: 60000)
+            Task { @MainActor in
+                let sent = await ReportSender.sendDirect(report: report, version: self.updater.currentVersion)
+                self.sendingReport = false
+                HUD.shared.show(sent
+                    ? ActivityReport(kind: .success, title: "Segnalazione inviata",
+                                     subtitle: "Claude la legge e corregge: la versione nuova arriva da sola, con una notifica")
+                    : ActivityReport(kind: .warning, title: "Segnalazione non partita",
+                                     subtitle: "Controlla di essere connesso a internet e riprova",
+                                     offersReport: false))
+            }
+            return
+        }
         let report = engine.supportReport(maxCharacters: 4500)
         Task { @MainActor in
             let outcome = await ReportSender.send(report: report, version: self.updater.currentVersion)
@@ -438,6 +452,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let spacesItem = commandItem("Gestisci le scrivanie", #selector(toggleManageSpaces), icon: "square.on.square")
         spacesItem.state = engine.manageSpaces ? .on : .off
         settingsMenu.addItem(spacesItem)
+        let othersItem = commandItem("Riduci nel Dock le finestre fuori dalla scena", #selector(toggleMinimizeOthers), icon: "dock.arrow.down.rectangle")
+        othersItem.state = engine.minimizeOthers ? .on : .off
+        settingsMenu.addItem(othersItem)
         let loginItem = commandItem("Avvia quando accendi il Mac", #selector(toggleLogin), icon: "power")
         loginItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
         settingsMenu.addItem(loginItem)
@@ -582,6 +599,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func toggleManageSpaces() {
         engine.manageSpaces.toggle()
+    }
+
+    @objc private func toggleMinimizeOthers() {
+        engine.minimizeOthers.toggle()
     }
 
     @objc private func toggleLogin() {
