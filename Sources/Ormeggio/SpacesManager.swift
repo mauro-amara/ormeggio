@@ -124,30 +124,49 @@ enum SpacesManager {
     }
 
     /// Sposta una finestra dalla scrivania visibile a un'altra dello stesso monitor:
-    /// la tiene per la barra del titolo e cambia scrivania con ctrl + freccia.
+    /// la tiene per la barra in alto e cambia scrivania con ctrl + freccia.
+    /// Prova più punti finché la finestra non si aggancia davvero al mouse.
     static func moveWindow(_ window: LiveWindow, on display: LiveDisplay, to targetIndex: Int, displays: [LiveDisplay]) async -> Bool {
         guard let layout = layouts(for: displays)[display.id], let current = layout.currentIndex,
               layout.spaceIDs.indices.contains(targetIndex) else { return false }
         if current == targetIndex { return true }
 
+        WindowManager.enableFullAccessibility(pid: window.pid)
         WindowManager.raise(window)
-        await Input.pause(0.3)
-        let grab = WindowManager.grabPoint(of: window)
-        let dragged = CGPoint(x: grab.x + 4, y: grab.y)
-        Input.moveMouse(to: grab)
-        await Input.pause(0.1)
-        Input.mouse(.leftMouseDown, at: grab)
-        await Input.pause(0.15)
-        Input.mouse(.leftMouseDragged, at: dragged)
-        await Input.pause(0.15)
+        await Input.pause(0.4)
+        let start = WindowManager.frame(of: window.element) ?? window.frame
+
+        var held: CGPoint?
+        for point in WindowManager.grabCandidates(of: window, frame: start) {
+            guard start.contains(point), WindowManager.isDraggableArea(point, pid: window.pid) else { continue }
+            Input.moveMouse(to: point)
+            await Input.pause(0.1)
+            Input.mouse(.leftMouseDown, at: point)
+            await Input.pause(0.15)
+            Input.mouse(.leftMouseDragged, at: CGPoint(x: point.x + 3, y: point.y))
+            await Input.pause(0.05)
+            let moved = CGPoint(x: point.x + 6, y: point.y)
+            Input.mouse(.leftMouseDragged, at: moved)
+            await Input.pause(0.25)
+            if let now = WindowManager.frame(of: window.element), abs(now.minX - start.minX) >= 2 {
+                held = moved
+                break
+            }
+            Input.mouse(.leftMouseUp, at: moved)
+            await Input.pause(0.2)
+        }
+        guard let held else {
+            Log.write("Finestra \"\(window.title)\": nessun punto da cui afferrarla")
+            return false
+        }
 
         let steps = targetIndex - current
         for _ in 0..<abs(steps) {
             Input.pressDesktopArrow(right: steps > 0)
-            await Input.pause(0.55)
+            await Input.pause(0.8)
         }
-        Input.mouse(.leftMouseUp, at: dragged)
-        await Input.pause(0.4)
+        Input.mouse(.leftMouseUp, at: held)
+        await Input.pause(0.5)
 
         guard let windowID = window.windowID else { return true }
         let targetSpace = layout.spaceIDs[targetIndex]

@@ -173,6 +173,48 @@ enum WindowManager {
         return CGPoint(x: window.frame.midX, y: window.frame.minY + 6)
     }
 
+    /// Punti da cui provare ad afferrare la finestra, dal più sicuro: a destra dei pulsanti colorati,
+    /// poi nella barra in alto. Il punto vecchio (sopra il pulsante verde) su macOS Tahoe cade
+    /// nel bordo da cui la finestra si ridimensiona.
+    static func grabCandidates(of window: LiveWindow, frame: CGRect) -> [CGPoint] {
+        var points: [CGPoint] = []
+        var value: CFTypeRef?
+        if AXUIElementCopyAttributeValue(window.element, kAXZoomButtonAttribute as CFString, &value) == .success,
+           let ref = value, CFGetTypeID(ref) == AXUIElementGetTypeID(),
+           let button = self.frame(of: ref as! AXUIElement) {
+            points.append(CGPoint(x: button.maxX + 12, y: button.midY))
+            points.append(CGPoint(x: button.maxX + 5, y: button.midY))
+            points.append(CGPoint(x: button.maxX + 40, y: button.midY))
+        }
+        points.append(CGPoint(x: frame.midX, y: frame.minY + 12))
+        points.append(CGPoint(x: frame.minX + frame.width * 0.75, y: frame.minY + 12))
+        return points
+    }
+
+    /// Vero se nel punto c'è una parte della finestra da cui la si trascina: niente pulsanti,
+    /// schede, campi di testo o link, e deve essere proprio l'app della finestra.
+    static func isDraggableArea(_ point: CGPoint, pid: pid_t) -> Bool {
+        var found: AXUIElement?
+        let systemWide = AXUIElementCreateSystemWide()
+        guard AXUIElementCopyElementAtPosition(systemWide, Float(point.x), Float(point.y), &found) == .success,
+              let element = found else { return false }
+        var owner: pid_t = 0
+        guard AXUIElementGetPid(element, &owner) == .success, owner == pid else { return false }
+        let role = stringAttribute(element, kAXRoleAttribute) ?? ""
+        let blocked: Set<String> = [
+            "AXButton", "AXRadioButton", "AXCheckBox", "AXPopUpButton", "AXMenuButton", "AXTextField",
+            "AXTextArea", "AXTab", "AXLink", "AXSlider", "AXComboBox", "AXIncrementor", "AXDisclosureTriangle"
+        ]
+        return !blocked.contains(role)
+    }
+
+    /// Chiede alle app fatte con Chromium o Electron (Chrome, Slack, Claude...) di mostrare
+    /// i loro elementi all'Accessibilità, così si vede dove sono pulsanti e schede.
+    static func enableFullAccessibility(pid: pid_t) {
+        let app = AXUIElementCreateApplication(pid)
+        _ = AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+    }
+
     /// Seleziona una voce della barra laterale (per esempio una pagina di Impostazioni di Sistema).
     @discardableResult
     static func selectSidebarItem(titled title: String, in window: AXUIElement) -> Bool {

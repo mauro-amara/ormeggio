@@ -826,12 +826,14 @@ final class Engine {
         // Finestre chiuse dopo il salvataggio, che non so o non devo riaprire: è normale.
         let closed = missing.filter { !reopenedKeys.contains(Engine.windowKey($0)) }
 
-        if missing.isEmpty {
+        let wrongDesktop = assignments.filter { $0.saved.desktop != nil && $0.saved.desktop != $0.tracked.desktop }
+        let inPlace = assignments.count - wrongDesktop.count
+        if missing.isEmpty && wrongDesktop.isEmpty {
             lines.append(.init(text: "Tutte le \(total) finestre della scena sono al loro posto."))
         } else if assignments.isEmpty {
             lines.append(.init(text: "Nessuna finestra della scena è aperta in questo momento.", tone: .info))
-        } else {
-            lines.append(.init(text: "Le \(assignments.count) finestre aperte sono al loro posto."))
+        } else if inPlace > 0 {
+            lines.append(.init(text: "\(inPlace) finestre su \(total) sono al loro posto."))
         }
         if !closed.isEmpty {
             let names = Engine.countedList(closed.map { self.windowName($0, profiles: profiles) })
@@ -842,7 +844,6 @@ final class Engine {
         if !notPlaced.isEmpty {
             notes.append(.init(text: "Ho riaperto " + Engine.countedList(notPlaced.map { self.windowName($0, profiles: profiles) }) + ", ma non sono riuscito a rimetterle al loro posto.", warning: true))
         }
-        let wrongDesktop = assignments.filter { $0.saved.desktop != nil && $0.saved.desktop != $0.tracked.desktop }
         for assignment in wrongDesktop.prefix(3) {
             notes.append(.init(text: "\(windowName(assignment.saved, profiles: profiles)): non sono riuscito a portarla sulla scrivania \(assignment.saved.desktop ?? 0).", warning: true))
         }
@@ -1139,8 +1140,8 @@ final class Engine {
             guard let live = assignments[index].tracked.live else { continue }
             if await SpacesManager.moveWindow(live, on: display, to: wanted - 1, displays: displays) {
                 assignments[index].tracked.desktop = wanted
-                assignments[index].needsFrame = true
             }
+            assignments[index].needsFrame = true
         }
     }
 
