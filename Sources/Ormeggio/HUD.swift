@@ -6,15 +6,38 @@ struct ActivityReport {
     enum Kind { case working, success, warning, failure }
 
     struct Line: Identifiable {
+        /// Fatto (verde), da sapere (informazione, nessun problema), non riuscito (arancione).
+        enum Tone { case done, info, warning }
+
         let id = UUID()
         var text: String
-        var warning = false
+        var tone: Tone
+
+        init(text: String, warning: Bool = false) {
+            self.text = text
+            self.tone = warning ? .warning : .done
+        }
+
+        init(text: String, tone: Tone) {
+            self.text = text
+            self.tone = tone
+        }
+
+        var warning: Bool { tone == .warning }
     }
 
     var kind: Kind
     var title: String
     var subtitle: String?
     var lines: [Line] = []
+    /// Pulsante in fondo al riquadro, per la cosa da fare subito.
+    var actionTitle: String?
+    var action: (@MainActor () -> Void)?
+}
+
+/// Il riquadro non è la finestra attiva: senza questo il primo clic su un pulsante andrebbe perso.
+private final class FirstClickHostingView<Content: View>: NSHostingView<Content> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
 
 /// Piccola finestra in basso al centro dello schermo, sopra il Dock, che non ruba il fuoco.
@@ -31,7 +54,7 @@ final class HUD {
         self.panel = panel
 
         let content = HUDView(report: report) { [weak self] in self?.hide() }
-        let hosting = NSHostingView(rootView: content)
+        let hosting = FirstClickHostingView(rootView: content)
         let size = hosting.fittingSize
 
         let effect = NSVisualEffectView(frame: NSRect(origin: .zero, size: size))
@@ -68,8 +91,8 @@ final class HUD {
         let seconds: Double?
         switch report.kind {
         case .working: seconds = nil
-        case .success: seconds = 6
-        case .warning, .failure: seconds = 14
+        case .success: seconds = report.action == nil && report.lines.allSatisfy({ $0.tone == .done }) ? 6 : 20
+        case .warning, .failure: seconds = 20
         }
         if let seconds {
             hideTask = Task { @MainActor [weak self] in
@@ -174,8 +197,9 @@ private struct HUDView: View {
                 }
             }
 
-            let done = report.lines.filter { !$0.warning }
-            let warnings = report.lines.filter(\.warning)
+            let done = report.lines.filter { $0.tone == .done }
+            let infos = report.lines.filter { $0.tone == .info }
+            let warnings = report.lines.filter { $0.tone == .warning }
             if !done.isEmpty {
                 Divider()
                 VStack(alignment: .leading, spacing: 7) {
@@ -186,7 +210,7 @@ private struct HUDView: View {
             }
             if !warnings.isEmpty {
                 Divider()
-                Text("DA SAPERE")
+                Text("NON SONO RIUSCITO A SISTEMARE")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
                 VStack(alignment: .leading, spacing: 7) {
@@ -194,6 +218,29 @@ private struct HUDView: View {
                         HUDLine(text: line.text, symbol: "exclamationmark.triangle.fill", color: .orange)
                     }
                 }
+            }
+            if !infos.isEmpty {
+                Divider()
+                Text("DA SAPERE")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 7) {
+                    ForEach(infos) { line in
+                        HUDLine(text: line.text, symbol: "info.circle.fill", color: .secondary)
+                    }
+                }
+            }
+            if let title = report.actionTitle, let action = report.action {
+                Button {
+                    onClose()
+                    action()
+                } label: {
+                    Text(title)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .padding(.top, 4)
             }
         }
         .padding(16)

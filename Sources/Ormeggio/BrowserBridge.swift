@@ -140,23 +140,41 @@ enum BrowserBridge {
         return meetingHosts.contains { host == $0 || host.hasSuffix("." + $0) } || host.hasSuffix("webex.com")
     }
 
-    /// Stato del permesso Automazione (controllare un'altra app con AppleScript), senza chiederlo.
-    static func automationStatus(bundleID: String) -> String {
-        guard NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first != nil else { return "app chiusa" }
+    /// Permesso Automazione (controllare un'altra app con AppleScript): 0 se concesso,
+    /// -1743 se negato, -1744 se macOS deve ancora chiederlo, -600 se l'app è chiusa.
+    /// Con ask a true macOS mostra la domanda e la funzione aspetta la risposta: non chiamarla dal thread principale.
+    nonisolated static func automationCode(bundleID: String, ask: Bool) -> OSStatus {
+        guard NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first != nil else { return -600 }
         var address = AEAddressDesc()
         let bytes = Array(bundleID.utf8)
         let created = bytes.withUnsafeBytes { buffer in
             AECreateDesc(DescType(typeApplicationBundleID), buffer.baseAddress, buffer.count, &address)
         }
-        guard created == OSErr(noErr) else { return "non verificabile" }
+        guard created == OSErr(noErr) else { return OSStatus(created) }
         defer { AEDisposeDesc(&address) }
-        let status = AEDeterminePermissionToAutomateTarget(&address, AEEventClass(typeWildCard), AEEventID(typeWildCard), false)
-        switch status {
-        case noErr: return "concessa"
+        return AEDeterminePermissionToAutomateTarget(&address, AEEventClass(typeWildCard), AEEventID(typeWildCard), ask)
+    }
+
+    /// Stato del permesso Automazione in parole, per la diagnostica.
+    static func automationStatus(bundleID: String) -> String {
+        switch automationCode(bundleID: bundleID, ask: false) {
+        case 0: return "concessa"
         case -1743: return "NEGATA"
         case -1744: return "da chiedere"
-        default: return "stato \(status)"
+        case -600: return "app chiusa"
+        case let other: return "stato \(other)"
         }
+    }
+
+    /// Toglie le risposte date a macOS sul permesso Automazione, così le chiede di nuovo.
+    static func resetAutomation() {
+        guard let bundleID = Bundle.main.bundleIdentifier else { return }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
+        process.arguments = ["reset", "AppleEvents", bundleID]
+        try? process.run()
+        process.waitUntilExit()
+        Log.write("Permesso Automazione azzerato (esito \(process.terminationStatus))")
     }
 
     /// Riconosce il profilo di una finestra di Chrome dal pulsante del profilo nella barra degli strumenti.

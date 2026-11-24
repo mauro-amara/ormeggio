@@ -181,6 +181,7 @@ final class Engine {
         }
         isBusy = true
         refreshState()
+        await ensureAutomation(for: [BrowserBridge.chromeID, BrowserBridge.safariID, FinderBridge.bundleID])
         var scene = capture(name: name)
         scene.autoApply = autoApply
         store.save(scene)
@@ -441,6 +442,7 @@ final class Engine {
     /// Riepilogo a schermo dopo il salvataggio, in parole semplici.
     private func reportSaved(_ scene: SavedScene) {
         var lines: [ActivityReport.Line] = []
+        var needsAutomation = false
         let windows = scene.windows.count
         let apps = Set(scene.windows.map(\.bundleID)).count
         lines.append(.init(text: "\(windows) \(windows == 1 ? "finestra" : "finestre") di \(apps) app, ognuna con il suo monitor e la sua scrivania"))
@@ -456,7 +458,8 @@ final class Engine {
             lines.append(.init(text: Engine.chromeZoomSummary(scene.chromeZoom)))
             let withoutTabs = chromeWindows.filter { ($0.tabs ?? []).isEmpty }
             if withoutTabs.count == chromeWindows.count {
-                lines.append(.init(text: "Non riesco a leggere le schede di Chrome. In Impostazioni di Sistema > Privacy e sicurezza > Automazione, lascia che Ormeggio controlli Google Chrome.", warning: true))
+                needsAutomation = true
+                lines.append(.init(text: "Non ho potuto leggere le schede di Chrome, quindi non ho salvato né le schede né lo zoom: macOS non mi dà il permesso. Apri le impostazioni qui sotto, sotto Ormeggio accendi Google Chrome e Finder, poi salva di nuovo.", warning: true))
             } else if !withoutTabs.isEmpty {
                 lines.append(.init(text: "Di \(withoutTabs.count) \(withoutTabs.count == 1 ? "finestra" : "finestre") di Chrome non ho letto le schede: se le chiudi non potrò riaprirle.", warning: true))
             }
@@ -467,15 +470,49 @@ final class Engine {
                 }
             }
         }
+        let finderWindows = scene.windows.filter { $0.bundleID == FinderBridge.bundleID }
+        if !finderWindows.isEmpty, finderWindows.allSatisfy({ $0.folderPath == nil }) {
+            needsAutomation = true
+            lines.append(.init(text: "Non ho potuto leggere le cartelle aperte nel Finder: se chiudi quelle finestre non potrò riaprirle.", warning: true))
+        }
         if windows == 0 {
             lines.append(.init(text: "Non ho trovato finestre: controlla il permesso di Accessibilità dal menu dell'ancora.", warning: true))
         }
         onActivity?(ActivityReport(
             kind: lines.contains(where: \.warning) ? .warning : .success,
             title: "Scena “\(scene.name)” salvata",
-            subtitle: "Per richiamarla: clic sull'ancora in alto, poi sul suo nome",
-            lines: lines
+            subtitle: needsAutomation ? nil : "Per richiamarla: clic sull'ancora in alto, poi sul suo nome",
+            lines: lines,
+            actionTitle: needsAutomation ? "Apri le impostazioni di Automazione" : nil,
+            action: needsAutomation ? {
+                if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation") {
+                    _ = NSWorkspace.shared.open(url)
+                }
+            } : nil
         ))
+    }
+
+    /// Prima di leggere schede e cartelle: se macOS non dà a Ormeggio il permesso di controllare Chrome,
+    /// Safari o il Finder (succede dopo un aggiornamento dell'app), lo azzera e lo richiede da solo.
+    /// Restituisce true se ha dovuto chiederlo.
+    @discardableResult
+    private func ensureAutomation(for bundleIDs: [String]) async -> Bool {
+        let running = bundleIDs.filter { !NSRunningApplication.runningApplications(withBundleIdentifier: $0).isEmpty }
+        guard !running.isEmpty else { return false }
+        let codes = running.map { BrowserBridge.automationCode(bundleID: $0, ask: false) }
+        guard codes.contains(where: { $0 != 0 }) else { return false }
+        Log.write("Permesso Automazione da sistemare: " + zip(running, codes).map { "\($0) \($1)" }.joined(separator: ", "))
+        if codes.contains(-1743) { BrowserBridge.resetAutomation() }
+        onActivity?(ActivityReport(
+            kind: .working,
+            title: "Chiedo a macOS il permesso per leggere schede e cartelle",
+            subtitle: "Quando macOS lo chiede, premi Consenti"
+        ))
+        for bundleID in running {
+            let code = await Task.detached { BrowserBridge.automationCode(bundleID: bundleID, ask: true) }.value
+            Log.write("Permesso Automazione per \(bundleID): \(code)")
+        }
+        return true
     }
 
     /// "Schermo del Mac" per il monitor integrato, il nome per gli altri.
@@ -560,11 +597,18 @@ final class Engine {
         refreshState()
         let started = Date()
         var notes: [ActivityReport.Line] = []
-        onActivity?(ActivityReport(
+        let workingReport = ActivityReport(
             kind: .working,
             title: "Sto ripristinando “\(scene.name)”…",
             subtitle: "Non toccare mouse e tastiera: ci vuole qualche secondo"
-        ))
+        )
+        onActivity?(workingReport)
+        let scriptedApps = Set(scene.windows.map(\.bundleID)).filter {
+            $0 == BrowserBridge.chromeID || $0 == BrowserBridge.safariID || $0 == FinderBridge.bundleID
+        }
+        if await ensureAutomation(for: Array(scriptedApps)) {
+            onActivity?(workingReport)
+        }
         let mouse = Input.mouseLocation
         Log.write("Richiamo la scena \"\(scene.name)\"")
 
@@ -575,7 +619,7 @@ final class Engine {
             guard let target = saved.mode else { continue }
             guard let live = displays.first(where: { $0.key == saved.key }) else {
                 Log.write("Scala: \(saved.name) non è collegato")
-                notes.append(.init(text: "\(saved.name) non è collegato: le finestre che stavano lì le lascio dove sono.", warning: true))
+                notes.append(.init(text: "\(saved.name) non è collegato: le finestre che stavano lì restano dove sono.", tone: .info))
                 continue
             }
             let current = live.mode?.label ?? "?"
@@ -638,7 +682,7 @@ final class Engine {
         for app in scene.apps where !runningIDs.contains(app.bundleID) {
             guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: app.bundleID) else {
                 Log.write("App non trovata: \(app.name)")
-                notes.append(.init(text: "\(app.name) non è installata su questo Mac", warning: true))
+                notes.append(.init(text: "\(app.name) non è installata su questo Mac.", tone: .info))
                 continue
             }
             let configuration = NSWorkspace.OpenConfiguration()
@@ -742,7 +786,7 @@ final class Engine {
         let chromeZoom = await applyChromeZoom(scene, displays: displays, profiles: profiles)
         if usesChrome {
             if scene.chromeZoom == nil {
-                notes.append(.init(text: "In questa scena lo zoom di Chrome non è salvato: risalvala per memorizzarlo.", warning: true))
+                notes.append(.init(text: "Questa scena non contiene lo zoom di Chrome, quindi non l'ho toccato.", tone: .info))
             } else if !chromeZoom.applied.isEmpty {
                 notes.append(.init(text: "Zoom di Chrome rimesso: " + Engine.shortList(chromeZoom.applied)))
             } else if chromeZoom.failed.isEmpty {
@@ -788,34 +832,71 @@ final class Engine {
         refreshState()
         Log.write("Scena \"\(scene.name)\" richiamata: \(assignments.count) finestre sistemate, \(launched) app aperte, \(reopened.count) finestre riaperte")
 
-        // Riepilogo a schermo: prima le finestre, poi il resto, in fondo cosa non è andato e perché.
+        // Riepilogo a schermo in parole semplici: cosa è a posto, cosa non è riuscito, cosa sapere.
         var lines: [ActivityReport.Line] = []
         let total = scene.windows.count
-        lines.append(.init(text: assignments.count == total
-            ? "Tutte le \(total) finestre al loro posto"
-            : "\(assignments.count) finestre su \(total) al loro posto"))
         let placedKeys = Set(assignments.map { Engine.windowKey($0.saved) })
         let reopenedKeys = Set(reopened.map { Engine.windowKey($0) })
         let missing = scene.windows.filter { !placedKeys.contains(Engine.windowKey($0)) }
-        for window in missing.prefix(4) {
-            notes.append(.init(text: missingReason(window, reopened: reopenedKeys.contains(Engine.windowKey(window)), profiles: profiles), warning: true))
+        // Finestre riaperte ma non sistemate: questo è un problema.
+        let notPlaced = missing.filter { reopenedKeys.contains(Engine.windowKey($0)) }
+        // Finestre chiuse dopo il salvataggio, che non so o non devo riaprire: è normale.
+        let closed = missing.filter { !reopenedKeys.contains(Engine.windowKey($0)) }
+
+        if missing.isEmpty {
+            lines.append(.init(text: "Tutte le \(total) finestre della scena sono al loro posto."))
+        } else if assignments.isEmpty {
+            lines.append(.init(text: "Nessuna finestra della scena è aperta in questo momento.", tone: .info))
+        } else {
+            lines.append(.init(text: "Le \(assignments.count) finestre aperte sono al loro posto."))
         }
-        if missing.count > 4 {
-            notes.append(.init(text: "Altre \(missing.count - 4) finestre non ritrovate", warning: true))
+        if !closed.isEmpty {
+            let names = Engine.countedList(closed.map { self.windowName($0, profiles: profiles) })
+            lines.append(.init(
+                text: "\(closed.count == 1 ? "Una finestra della scena l'hai chiusa" : "\(closed.count) finestre della scena le hai chiuse") dopo il salvataggio e non la riapro: \(names).",
+                tone: .info))
+        }
+        if !notPlaced.isEmpty {
+            notes.append(.init(text: "Ho riaperto " + Engine.countedList(notPlaced.map { self.windowName($0, profiles: profiles) }) + ", ma non sono riuscito a rimetterle al loro posto.", warning: true))
         }
         let wrongDesktop = assignments.filter { $0.saved.desktop != nil && $0.saved.desktop != $0.tracked.desktop }
         for assignment in wrongDesktop.prefix(3) {
-            notes.append(.init(text: "\(windowName(assignment.saved, profiles: profiles)): non sono riuscito a portarla sulla scrivania \(assignment.saved.desktop ?? 0)", warning: true))
+            notes.append(.init(text: "\(windowName(assignment.saved, profiles: profiles)): non sono riuscito a portarla sulla scrivania \(assignment.saved.desktop ?? 0).", warning: true))
         }
-        lines += notes.filter { !$0.warning } + notes.filter(\.warning)
-        let seconds = max(1, Int(Date().timeIntervalSince(started).rounded()))
+        lines += notes.filter { $0.tone == .done } + notes.filter { $0.tone == .warning } + notes.filter { $0.tone == .info }
+
+        // La scena è vecchia (finestre chiuse, zoom di Chrome mancante): propongo di aggiornarla con un clic.
+        let stale = !closed.isEmpty || (usesChrome && scene.chromeZoom == nil)
+        if stale {
+            lines.append(.init(text: "Se adesso il Mac è come lo vuoi, aggiorna la scena: Ormeggio dimentica le finestre chiuse e salva lo zoom di Chrome.", tone: .info))
+        }
         let hasWarnings = lines.contains(where: \.warning)
+        let sceneName = scene.name
+        let sceneAuto = scene.autoApply
         onActivity?(ActivityReport(
             kind: hasWarnings ? .warning : .success,
-            title: hasWarnings ? "Scena “\(scene.name)” ripristinata in parte" : "Scena “\(scene.name)” ripristinata",
-            subtitle: "Ci ho messo \(seconds) \(seconds == 1 ? "secondo" : "secondi")",
-            lines: lines
+            title: hasWarnings ? "“\(sceneName)”: qualcosa non è tornato" : "“\(sceneName)” è al suo posto",
+            subtitle: nil,
+            lines: lines,
+            actionTitle: stale ? "Aggiorna “\(sceneName)” con il Mac com'è adesso" : nil,
+            action: stale ? { [weak self] in
+                guard let self else { return }
+                Task { @MainActor in await self.saveScene(name: sceneName, autoApply: sceneAuto) }
+            } : nil
         ))
+    }
+
+    /// Elenco con i doppioni contati: "Finder (2), Chrome “Meet”".
+    static func countedList(_ items: [String]) -> String {
+        var order: [String] = []
+        var counts: [String: Int] = [:]
+        for item in items {
+            if counts[item] == nil { order.append(item) }
+            counts[item, default: 0] += 1
+        }
+        let parts = order.map { counts[$0, default: 1] > 1 ? "\($0) (\(counts[$0, default: 1]))" : $0 }
+        let shown = parts.prefix(4).joined(separator: ", ")
+        return parts.count > 4 ? "\(shown) e altre \(parts.count - 4)" : shown
     }
 
     /// Nome leggibile di una finestra salvata: app e titolo, senza il profilo di Chrome.
@@ -827,21 +908,6 @@ final class Engine {
         }
         title = BrowserBridge.readableTitle(title, profiles: profiles)
         return title.isEmpty || title == app ? app : "\(app) “\(title)”"
-    }
-
-    /// Perché una finestra della scena non è tornata, in parole semplici.
-    private func missingReason(_ window: SavedWindow, reopened: Bool, profiles: [ChromeProfile]) -> String {
-        let name = windowName(window, profiles: profiles)
-        if BrowserBridge.isBrowser(window.bundleID) {
-            let tabs = window.tabs ?? []
-            if tabs.isEmpty { return "\(name): era chiusa e non so quali schede avesse, quindi non l'ho riaperta" }
-            if tabs.allSatisfy({ BrowserBridge.isMeeting($0) }) { return "\(name): era una riunione finita, non la riapro" }
-        }
-        if window.bundleID == FinderBridge.bundleID, window.folderPath == nil {
-            return "\(name): era chiusa e non so quale cartella mostrasse"
-        }
-        if reopened { return "\(name): l'ho riaperta ma non sono riuscito a metterla al suo posto" }
-        return "\(name): era chiusa e questa app non mi permette di riaprirla"
     }
 
     /// Chiave per riconoscere la stessa finestra salvata.

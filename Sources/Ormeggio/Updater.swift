@@ -30,6 +30,8 @@ final class Updater {
 
     private(set) var available: UpdateInfo?
     var onChange: (@MainActor () -> Void)?
+    /// Chiamata quando c'è una versione nuova: l'app la installa da sola.
+    var onAvailable: (@MainActor (UpdateInfo) -> Void)?
     private var timer: Timer?
 
     var currentVersion: String {
@@ -45,7 +47,7 @@ final class Updater {
             await Input.pause(10)
             await self.check()
         }
-        timer = Timer.scheduledTimer(withTimeInterval: 6 * 3600, repeats: true) { [weak self] _ in
+        timer = Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
             guard let self else { return }
             Task { @MainActor in await self.check() }
         }
@@ -65,7 +67,10 @@ final class Updater {
             let info = try JSONDecoder().decode(UpdateInfo.self, from: data)
             available = info.build > currentBuild ? info : nil
             onChange?()
-            if let available { Log.write("Aggiornamento disponibile: \(available.version)") }
+            if let available {
+                Log.write("Aggiornamento disponibile: \(available.version)")
+                onAvailable?(available)
+            }
             return available
         } catch {
             Log.write("Controllo aggiornamenti non riuscito: \(error.localizedDescription)")
@@ -115,10 +120,12 @@ final class Updater {
         """
         let scriptURL = work.appendingPathComponent("installa.sh")
         try script.write(to: scriptURL, atomically: true, encoding: .utf8)
+        // Lo script parte staccato da Ormeggio, così continua anche quando Ormeggio si chiude.
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/bash")
-        process.arguments = [scriptURL.path]
+        process.arguments = ["-c", "nohup /bin/bash \"\(scriptURL.path)\" >/dev/null 2>&1 &"]
         try process.run()
+        process.waitUntilExit()
 
         UserDefaults.standard.set(currentVersion, forKey: "updatedFrom")
         Log.write("Aggiornamento alla \(info.version): installazione avviata")

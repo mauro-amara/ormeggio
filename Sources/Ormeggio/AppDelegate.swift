@@ -15,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     )
     private let updater = Updater()
     private var trustTimer: Timer?
+    private var installing = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -37,34 +38,61 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } else if UserDefaults.standard.string(forKey: "updatedFrom") != nil {
             showUpdateCompleted()
         } else if !WindowManager.isTrusted(prompt: false) {
-            repairPermission(atLaunch: true)
+            repairPermissionAutomatically()
         }
         engine.start()
         watchPermission()
         updater.onChange = { [weak self] in self?.updateIcon() }
+        updater.onAvailable = { [weak self] info in self?.installAutomatically(info) }
         updater.start()
     }
 
     // MARK: Aggiornamenti
 
-    /// Dopo un aggiornamento: conferma e, se serve, chiede di nuovo il permesso di Accessibilità.
+    /// Dopo un aggiornamento: lo dice nel riquadro e, se serve, ripara da solo il permesso di Accessibilità.
     private func showUpdateCompleted() {
         UserDefaults.standard.removeObject(forKey: "updatedFrom")
-        let trusted = WindowManager.isTrusted(prompt: false)
-        let alert = NSAlert()
-        alert.messageText = "Ormeggio aggiornato alla versione \(updater.currentVersion)"
-        if trusted {
-            alert.informativeText = "Tutto pronto. Le tue scene sono al loro posto."
-            alert.addButton(withTitle: "OK")
-            NSApp.activate()
-            _ = alert.runModal()
+        if WindowManager.isTrusted(prompt: false) {
+            HUD.shared.show(ActivityReport(
+                kind: .success,
+                title: "Ormeggio aggiornato alla versione \(updater.currentVersion)",
+                subtitle: "Le tue scene sono al loro posto"
+            ))
+        } else {
+            repairPermissionAutomatically()
+        }
+    }
+
+    /// Installa da sola la versione nuova, appena Ormeggio non sta spostando finestre.
+    private func installAutomatically(_ info: UpdateInfo) {
+        guard !installing else { return }
+        guard !engine.isWorking else {
+            Task { @MainActor in
+                await Input.pause(60)
+                self.installAutomatically(info)
+            }
             return
         }
-        alert.informativeText = "macOS chiede di riattivare Ormeggio in Accessibilità, perché l'app è nuova. Premi \"Continua\": si apre Impostazioni di Sistema, attiva Ormeggio nell'elenco e torna qui."
-        alert.addButton(withTitle: "Continua")
-        NSApp.activate()
-        _ = alert.runModal()
-        resetAndAskPermission()
+        installing = true
+        HUD.shared.show(ActivityReport(
+            kind: .working,
+            title: "Aggiorno Ormeggio alla versione \(info.version)…",
+            subtitle: "Si chiude e si riapre da solo, le scene restano"
+        ))
+        Task { @MainActor in
+            do {
+                try await self.updater.install(info)
+            } catch {
+                self.installing = false
+                Log.write("Aggiornamento non riuscito: \(error.localizedDescription)")
+                HUD.shared.show(ActivityReport(
+                    kind: .failure,
+                    title: "Aggiornamento non riuscito",
+                    subtitle: "Riprovo da solo tra un'ora",
+                    lines: [.init(text: error.localizedDescription, warning: true)]
+                ))
+            }
+        }
     }
 
     // MARK: Permesso di Accessibilità
@@ -87,18 +115,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func repairPermissionFromMenu() {
-        repairPermission(atLaunch: false)
+        repairPermissionAutomatically()
     }
 
-    private func repairPermission(atLaunch: Bool) {
-        let alert = NSAlert()
-        alert.messageText = "Ormeggio non ha il permesso di Accessibilità"
-        alert.informativeText = "Se nell'elenco Ormeggio risulta già attivo, macOS lo sta collegando a una versione precedente dell'app.\n\nPremi \"Ripara\": tolgo la voce vecchia e si apre Impostazioni di Sistema. Riattiva Ormeggio nell'elenco. L'icona in alto perde il \"!\" appena macOS conferma."
-        alert.addButton(withTitle: "Ripara")
-        alert.addButton(withTitle: atLaunch ? "Più tardi" : "Annulla")
-        NSApp.activate()
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
+    /// Toglie la voce vecchia di Accessibilità, la richiede e apre Impostazioni di Sistema.
+    /// L'interruttore lo deve accendere la persona: macOS non lo lascia fare a nessuna app.
+    private func repairPermissionAutomatically() {
         resetAndAskPermission()
+        HUD.shared.show(ActivityReport(
+            kind: .warning,
+            title: "Accendi Ormeggio in Accessibilità",
+            subtitle: "È l'unica cosa che macOS non lascia fare a un'app",
+            lines: [.init(text: "Ho aperto Impostazioni di Sistema su Accessibilità. Accendi l'interruttore accanto a Ormeggio: il resto lo faccio io.", tone: .info)]
+        ))
+    }
+
+    /// Per chi chiama ancora la vecchia versione con la domanda.
+    private func repairPermission(atLaunch: Bool) {
+        repairPermissionAutomatically()
     }
 
     /// Controlla il permesso ogni 2 secondi finché manca, così l'icona si aggiorna da sola.
@@ -121,41 +155,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func installUpdate() {
         guard let info = updater.available else { return }
-        let alert = NSAlert()
-        alert.messageText = "È disponibile Ormeggio \(info.version)"
-        var text = "Hai la versione \(updater.currentVersion)."
-        if let notes = info.notes, !notes.isEmpty { text += "\n\nNovità: \(notes)" }
-        text += "\n\nPremi \"Aggiorna\": Ormeggio scarica la nuova versione, si chiude, si aggiorna e si riapre da solo. Le scene restano."
-        alert.informativeText = text
-        alert.addButton(withTitle: "Aggiorna")
-        alert.addButton(withTitle: "Più tardi")
-        NSApp.activate()
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        Task { @MainActor in
-            do {
-                try await self.updater.install(info)
-            } catch {
-                Log.write("Aggiornamento non riuscito: \(error.localizedDescription)")
-                let failure = NSAlert()
-                failure.messageText = "Aggiornamento non riuscito"
-                failure.informativeText = "Ormeggio non è riuscito ad aggiornarsi da solo: \(error.localizedDescription). Scarica la nuova versione e trascinala in Applicazioni."
-                failure.addButton(withTitle: "Scarica")
-                failure.addButton(withTitle: "Chiudi")
-                NSApp.activate()
-                if failure.runModal() == .alertFirstButtonReturn, let url = self.updater.downloadURL(for: info) {
-                    _ = NSWorkspace.shared.open(url)
-                }
-            }
-        }
+        installAutomatically(info)
     }
 
     @objc private func checkForUpdates() {
         Task { @MainActor in
-            let info = await self.updater.check()
-            if info != nil {
-                self.installUpdate()
-            } else {
-                self.showMessage("Aggiornamenti", "Hai già l'ultima versione di Ormeggio (\(self.updater.currentVersion)).")
+            if await self.updater.check() == nil {
+                HUD.shared.show(ActivityReport(
+                    kind: .success,
+                    title: "Hai già l'ultima versione",
+                    subtitle: "Ormeggio \(self.updater.currentVersion)"
+                ))
             }
         }
     }
