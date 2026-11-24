@@ -25,6 +25,8 @@ struct TrackedWindow {
     var isFullScreen: Bool
     /// Documento della finestra: per il Finder l'indirizzo della cartella mostrata.
     var document: String? = nil
+    /// Schede aperte (Chrome), dai file di sessione.
+    var tabs: [String]? = nil
 }
 
 /// Una finestra salvata abbinata alla finestra aperta che la rappresenta.
@@ -475,6 +477,12 @@ final class Engine {
         }
         let chromeWindows = scene.windows.filter { $0.bundleID == BrowserBridge.chromeID }
         if !chromeWindows.isEmpty {
+            let names = Dictionary(BrowserBridge.chromeProfiles().map { ($0.directory, $0.name) }, uniquingKeysWith: { first, _ in first })
+            var perProfile: [String: Int] = [:]
+            for window in chromeWindows { perProfile[window.chromeProfile.map { names[$0] ?? $0 } ?? "profilo non riconosciuto", default: 0] += 1 }
+            let tabCount = chromeWindows.reduce(0) { $0 + ($1.tabs?.count ?? 0) }
+            let profilesText = perProfile.sorted { $0.key < $1.key }.map { "\($0.key) \($0.value)" }.joined(separator: ", ")
+            lines.append(.init(text: "Chrome: \(chromeWindows.count) \(chromeWindows.count == 1 ? "finestra" : "finestre") con \(tabCount) schede, per profilo: \(profilesText)"))
             lines.append(.init(text: Engine.chromeZoomSummary(scene.chromeZoom)))
             let withoutTabs = chromeWindows.filter { ($0.tabs ?? []).isEmpty }
             if withoutTabs.count == chromeWindows.count {
@@ -690,7 +698,8 @@ final class Engine {
         for window in scene.windows {
             if let id = window.windowID, let profile = window.chromeProfile { knownProfiles[id] = profile }
         }
-        let tracked = inventory(displays: displays, profiles: profiles, knownProfiles: knownProfiles)
+        var tracked = inventory(displays: displays, profiles: profiles, knownProfiles: knownProfiles)
+        if usesChrome { Engine.attachChromeTabs(&tracked, profiles: profiles) }
         Log.write("Finestre trovate: \(tracked.count). " + Engine.describe(tracked))
 
         // 5. Abbinamento tra finestre salvate e finestre aperte
@@ -705,7 +714,7 @@ final class Engine {
             await Input.pause(3)
             let known = Set(tracked.compactMap(\.windowID))
             let fresh = inventory(displays: displays, profiles: profiles, excluding: known)
-            var more = match(reopened, with: fresh).assignments
+            var more = match(reopened, with: fresh, strict: false).assignments
             for index in more.indices { more[index].needsFrame = true }
             assignments += more
             if !more.isEmpty {
@@ -745,6 +754,34 @@ final class Engine {
 
         // 9. Posizione e dimensione
         await placeFrames(&assignments, scene: scene, displays: displays)
+
+        // 9b. Schede di Chrome che mancano nelle finestre già aperte: le apro in quella finestra.
+        var tabsReopened: [String] = []
+        for index in assignments.indices where assignments[index].saved.bundleID == BrowserBridge.chromeID {
+            let saved = assignments[index].saved
+            guard let openTabs = assignments[index].tracked.tabs else { continue }
+            let present = Set(openTabs.map(Engine.pageKey))
+            var seen = Set<String>()
+            let missingTabs = (saved.tabs ?? []).filter { address in
+                let key = Engine.pageKey(address)
+                return !BrowserBridge.isMeeting(address) && !present.contains(key) && seen.insert(key).inserted
+            }
+            guard !missingTabs.isEmpty,
+                  let live = await liveWindow(for: &assignments[index].tracked, displays: displays) else { continue }
+            WindowManager.raise(live)
+            await Input.pause(0.5)
+            guard BrowserBridge.focusedChromeWindow(pid: live.pid)?.id == live.windowID else {
+                Log.write("Schede mancanti in \"\(saved.title)\": la finestra non è andata in primo piano")
+                continue
+            }
+            BrowserBridge.openChromeTabs(profile: saved.chromeProfile ?? assignments[index].tracked.chromeProfile, urls: missingTabs)
+            await Input.pause(1.2)
+            Log.write("Schede riaperte in \"\(saved.title)\": " + missingTabs.joined(separator: " "))
+            tabsReopened.append("\(windowName(saved, profiles: profiles)) (\(missingTabs.count))")
+        }
+        if !tabsReopened.isEmpty {
+            notes.append(.init(text: "Ho riaperto le schede che mancavano in " + Engine.shortList(tabsReopened)))
+        }
 
         // 10. Pagina giusta di Impostazioni di Sistema
         for assignment in assignments where assignment.saved.bundleID == Engine.settingsID {
@@ -1003,7 +1040,10 @@ final class Engine {
     // MARK: Abbinamento
 
     /// Abbina per identificativo (stessa finestra ancora aperta), poi per titolo, poi nell'ordine.
-    func match(_ saved: [SavedWindow], with tracked: [TrackedWindow]) -> (assignments: [Assignment], unmatched: [SavedWindow]) {
+    /// Abbina le finestre salvate a quelle aperte: prima per numero di finestra, poi le finestre di Chrome
+    /// per profilo e schede, poi per titolo, infine in ordine. Con strict, una finestra che si può riaprire
+    /// (cartella, documento, finestra del browser con le sue schede) non viene data a una finestra qualsiasi.
+    func match(_ saved: [SavedWindow], with tracked: [TrackedWindow], strict: Bool = true) -> (assignments: [Assignment], unmatched: [SavedWindow]) {
         var available = tracked
         var assignments: [Assignment] = []
 
@@ -1016,6 +1056,27 @@ final class Engine {
                 pending.append(window)
             }
         }
+
+        // Chrome: stesso profilo e schede in comune, dalla coppia più simile.
+        var pairs: [(saved: Int, tracked: Int, score: Double)] = []
+        for (savedIndex, window) in pending.enumerated() where window.bundleID == BrowserBridge.chromeID {
+            let savedTabs = window.tabs ?? []
+            guard !savedTabs.isEmpty else { continue }
+            for (trackedIndex, candidate) in available.enumerated() where candidate.bundleID == BrowserBridge.chromeID {
+                guard let openTabs = candidate.tabs, Engine.sameProfile(window, candidate) else { continue }
+                let score = Engine.tabSimilarity(savedTabs, openTabs)
+                if score > 0 { pairs.append((saved: savedIndex, tracked: trackedIndex, score: score)) }
+            }
+        }
+        var usedSaved = Set<Int>()
+        var usedTracked = Set<Int>()
+        for pair in pairs.sorted(by: { $0.score > $1.score }) where !usedSaved.contains(pair.saved) && !usedTracked.contains(pair.tracked) {
+            usedSaved.insert(pair.saved)
+            usedTracked.insert(pair.tracked)
+            assignments.append(Assignment(saved: pending[pair.saved], tracked: available[pair.tracked]))
+        }
+        pending = pending.enumerated().filter { !usedSaved.contains($0.offset) }.map(\.element)
+        available = available.enumerated().filter { !usedTracked.contains($0.offset) }.map(\.element)
 
         var stillPending: [SavedWindow] = []
         for window in pending {
@@ -1031,9 +1092,11 @@ final class Engine {
 
         var unmatched: [SavedWindow] = []
         for window in stillPending.sorted(by: { $0.index < $1.index }) {
-            // Cartelle e documenti si riaprono: non li assegno a una finestra qualsiasi della stessa app.
+            // Cartelle, documenti e finestre del browser si riaprono: non li assegno a una finestra qualsiasi.
+            let browserTabs = (window.tabs ?? []).filter { !BrowserBridge.isMeeting($0) }
             let reopenable = window.folderPath != nil || window.documentURL != nil
-            if !reopenable,
+                || (BrowserBridge.isBrowser(window.bundleID) && !browserTabs.isEmpty)
+            if !(strict && reopenable),
                let found = available.firstIndex(where: { $0.bundleID == window.bundleID && Engine.sameProfile(window, $0) }) {
                 assignments.append(Assignment(saved: window, tracked: available.remove(at: found)))
             } else {
@@ -1041,6 +1104,39 @@ final class Engine {
             }
         }
         return (assignments, unmatched)
+    }
+
+    /// Una pagina riconosciuta per sito e percorso, senza parametri e senza #: così la posta in arrivo
+    /// e un messaggio aperto nella stessa casella contano come la stessa scheda.
+    static func pageKey(_ address: String) -> String {
+        guard let url = URL(string: address), let host = url.host?.lowercased() else { return address }
+        var path = url.path
+        while path.hasSuffix("/") { path.removeLast() }
+        return host + path
+    }
+
+    /// Quanto si somigliano due elenchi di schede: pagine in comune, poi siti in comune.
+    static func tabSimilarity(_ lhs: [String], _ rhs: [String]) -> Double {
+        let leftPages = Set(lhs.map(pageKey))
+        let rightPages = Set(rhs.map(pageKey))
+        let leftHosts = Set(lhs.compactMap { BrowserBridge.host(of: $0) })
+        let rightHosts = Set(rhs.compactMap { BrowserBridge.host(of: $0) })
+        let pages = Double(leftPages.intersection(rightPages).count) / Double(max(leftPages.union(rightPages).count, 1))
+        let hosts = Double(leftHosts.intersection(rightHosts).count) / Double(max(leftHosts.union(rightHosts).count, 1))
+        return pages + hosts / 2
+    }
+
+    /// Aggiunge alle finestre di Chrome aperte le loro schede e il loro profilo, dai file di sessione.
+    static func attachChromeTabs(_ tracked: inout [TrackedWindow], profiles: [ChromeProfile]) {
+        guard tracked.contains(where: { $0.bundleID == BrowserBridge.chromeID }) else { return }
+        var sessions = ChromeSession.windows(profiles: profiles)
+        for index in tracked.indices where tracked[index].bundleID == BrowserBridge.chromeID {
+            let window = tracked[index]
+            guard let found = ChromeSession.match(title: window.title, frame: window.frame, profile: window.chromeProfile, in: sessions) else { continue }
+            let session = sessions.remove(at: found)
+            tracked[index].tabs = session.tabs
+            if tracked[index].chromeProfile == nil { tracked[index].chromeProfile = session.profile }
+        }
     }
 
     private static func sameProfile(_ saved: SavedWindow, _ tracked: TrackedWindow) -> Bool {

@@ -347,6 +347,23 @@ enum BrowserBridge {
 
     // MARK: Apertura di finestre
 
+    /// Apre le schede indicate nella finestra di Chrome del profilo usata per ultima
+    /// (quella appena messa in primo piano), senza aprire una finestra nuova.
+    static func openChromeTabs(profile: String?, urls: [String]) {
+        guard !urls.isEmpty else { return }
+        var arguments = ["-na", "Google Chrome", "--args"]
+        if let profile { arguments.append("--profile-directory=\(profile)") }
+        arguments.append(contentsOf: urls)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        process.arguments = arguments
+        do {
+            try process.run()
+        } catch {
+            Log.write("Non riesco ad aprire le schede in Chrome: \(error.localizedDescription)")
+        }
+    }
+
     /// Apre una nuova finestra di Chrome nel profilo indicato, con le schede indicate.
     static func openChromeWindow(profile: String?, urls: [String]) {
         var arguments = ["-na", "Google Chrome", "--args"]
