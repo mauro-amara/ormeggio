@@ -23,6 +23,8 @@ struct TrackedWindow {
     var chromeProfile: String?
     var isMinimized: Bool
     var isFullScreen: Bool
+    /// Documento della finestra: per il Finder l'indirizzo della cartella mostrata.
+    var document: String? = nil
 }
 
 /// Una finestra salvata abbinata alla finestra aperta che la rappresenta.
@@ -181,7 +183,6 @@ final class Engine {
         }
         isBusy = true
         refreshState()
-        await ensureAutomation(for: [BrowserBridge.chromeID, BrowserBridge.safariID, FinderBridge.bundleID])
         var scene = capture(name: name)
         scene.autoApply = autoApply
         store.save(scene)
@@ -226,10 +227,17 @@ final class Engine {
 
         let running = WindowManager.regularApps()
         let runningIDs = Set(running.compactMap(\.bundleIdentifier))
-        let finderFolders = runningIDs.contains(FinderBridge.bundleID) ? FinderBridge.openFolders() : []
-        var chromeInfos = runningIDs.contains(BrowserBridge.chromeID) ? BrowserBridge.windows(bundleID: BrowserBridge.chromeID) : []
-        var safariInfos = runningIDs.contains(BrowserBridge.safariID) ? BrowserBridge.windows(bundleID: BrowserBridge.safariID) : []
+        // AppleScript solo se macOS ha già dato il permesso: così non compare nessuna domanda.
+        func scriptable(_ bundleID: String) -> Bool {
+            runningIDs.contains(bundleID) && BrowserBridge.automationCode(bundleID: bundleID, ask: false) == 0
+        }
+        let finderFolders = scriptable(FinderBridge.bundleID) ? FinderBridge.openFolders() : []
+        var chromeInfos = scriptable(BrowserBridge.chromeID) ? BrowserBridge.windows(bundleID: BrowserBridge.chromeID) : []
+        var safariInfos = scriptable(BrowserBridge.safariID) ? BrowserBridge.windows(bundleID: BrowserBridge.safariID) : []
         let profiles = runningIDs.contains(BrowserBridge.chromeID) ? BrowserBridge.chromeProfiles() : []
+        // Schede, profilo e posizione di ogni finestra di Chrome, dai file di sessione: nessun permesso.
+        var chromeSessions = runningIDs.contains(BrowserBridge.chromeID) ? ChromeSession.windows(profiles: profiles) : []
+        Log.write("Sessioni di Chrome lette: \(chromeSessions.count) finestre, \(chromeSessions.reduce(0) { $0 + $1.tabs.count }) schede")
 
         // Profili di Chrome già noti dalle scene salvate, per le finestre ancora aperte.
         var knownProfiles: [CGWindowID: String] = [:]
@@ -282,13 +290,22 @@ final class Engine {
             )
             switch item.bundleID {
             case FinderBridge.bundleID:
-                if let match = Engine.folderIndex(title: item.title, frame: item.frame, in: unusedFolders) {
+                // La cartella la dice l'Accessibilità; AppleScript resta come riserva.
+                if let raw = item.document, let url = URL(string: raw), url.isFileURL {
+                    saved.folderPath = url.path
+                    if saved.title.isEmpty { saved.title = FinderBridge.displayName(of: url.path) }
+                } else if let match = Engine.folderIndex(title: item.title, frame: item.frame, in: unusedFolders) {
                     let folder = unusedFolders.remove(at: match)
                     saved.folderPath = folder.path
                     if saved.title.isEmpty { saved.title = FinderBridge.displayName(of: folder.path) }
                 }
             case BrowserBridge.chromeID:
-                if let match = BrowserBridge.match(title: item.title, frame: item.frame, in: chromeInfos) {
+                if let match = ChromeSession.match(title: item.title, frame: item.frame, profile: item.chromeProfile, in: chromeSessions) {
+                    let session = chromeSessions.remove(at: match)
+                    saved.tabs = session.tabs
+                    if saved.chromeProfile == nil { saved.chromeProfile = session.profile }
+                    if saved.title.isEmpty { saved.title = session.activeTitle }
+                } else if let match = BrowserBridge.match(title: item.title, frame: item.frame, in: chromeInfos) {
                     let info = chromeInfos.remove(at: match)
                     saved.tabs = info.urls
                     if saved.title.isEmpty { saved.title = info.title }
@@ -364,9 +381,9 @@ final class Engine {
         var result: [TrackedWindow] = []
         var seen = excluding
         // Titoli delle finestre di Chrome sulle altre scrivanie (servono per profilo e schede).
-        var otherDesktopTitles: [pid_t: [CGWindowID: String]] = [:]
+        var otherDesktopWindows: [pid_t: [CGWindowID: (title: String, document: String?)]] = [:]
 
-        func add(id: CGWindowID?, app: NSRunningApplication, live: LiveWindow?, frame: CGRect, title: String, spaces: [Int]) {
+        func add(id: CGWindowID?, app: NSRunningApplication, live: LiveWindow?, frame: CGRect, title: String, spaces: [Int], document: String? = nil) {
             guard let bundleID = app.bundleIdentifier,
                   let display = Engine.display(for: frame, in: displays) else { return }
             var desktop: Int?
@@ -398,7 +415,8 @@ final class Engine {
                 desktop: desktop,
                 chromeProfile: profile,
                 isMinimized: live?.isMinimized ?? false,
-                isFullScreen: live?.isFullScreen ?? false
+                isFullScreen: live?.isFullScreen ?? false,
+                document: live?.documentURL ?? document
             ))
         }
 
@@ -416,13 +434,16 @@ final class Engine {
                       system.alpha > 0, system.bounds.width >= 120, system.bounds.height >= 90 else { continue }
                 seen.insert(system.id)
                 var title = system.name ?? ""
-                if title.isEmpty, app.bundleIdentifier == BrowserBridge.chromeID {
-                    if otherDesktopTitles[app.processIdentifier] == nil {
-                        otherDesktopTitles[app.processIdentifier] = WindowManager.titlesOnAllDesktops(pid: app.processIdentifier)
+                var document: String?
+                if app.bundleIdentifier == BrowserBridge.chromeID || app.bundleIdentifier == FinderBridge.bundleID {
+                    if otherDesktopWindows[app.processIdentifier] == nil {
+                        otherDesktopWindows[app.processIdentifier] = WindowManager.windowsOnAllDesktops(pid: app.processIdentifier)
                     }
-                    title = otherDesktopTitles[app.processIdentifier]?[system.id] ?? ""
+                    let info = otherDesktopWindows[app.processIdentifier]?[system.id]
+                    if title.isEmpty { title = info?.title ?? "" }
+                    document = info?.document
                 }
-                add(id: system.id, app: app, live: nil, frame: system.bounds, title: title, spaces: spaces)
+                add(id: system.id, app: app, live: nil, frame: system.bounds, title: title, spaces: spaces, document: document)
             }
         }
 
@@ -442,7 +463,6 @@ final class Engine {
     /// Riepilogo a schermo dopo il salvataggio, in parole semplici.
     private func reportSaved(_ scene: SavedScene) {
         var lines: [ActivityReport.Line] = []
-        var needsAutomation = false
         let windows = scene.windows.count
         let apps = Set(scene.windows.map(\.bundleID)).count
         lines.append(.init(text: "\(windows) \(windows == 1 ? "finestra" : "finestre") di \(apps) app, ognuna con il suo monitor e la sua scrivania"))
@@ -458,8 +478,7 @@ final class Engine {
             lines.append(.init(text: Engine.chromeZoomSummary(scene.chromeZoom)))
             let withoutTabs = chromeWindows.filter { ($0.tabs ?? []).isEmpty }
             if withoutTabs.count == chromeWindows.count {
-                needsAutomation = true
-                lines.append(.init(text: "Non ho potuto leggere le schede di Chrome, quindi non ho salvato né le schede né lo zoom: macOS non mi dà il permesso. Apri le impostazioni qui sotto, sotto Ormeggio accendi Google Chrome e Finder, poi salva di nuovo.", warning: true))
+                lines.append(.init(text: "Non sono riuscito a leggere le schede di Chrome, quindi non ho salvato né le schede né lo zoom. Mandami la diagnostica: ci guardo io.", warning: true))
             } else if !withoutTabs.isEmpty {
                 lines.append(.init(text: "Di \(withoutTabs.count) \(withoutTabs.count == 1 ? "finestra" : "finestre") di Chrome non ho letto le schede: se le chiudi non potrò riaprirle.", warning: true))
             }
@@ -472,53 +491,17 @@ final class Engine {
         }
         let finderWindows = scene.windows.filter { $0.bundleID == FinderBridge.bundleID }
         if !finderWindows.isEmpty, finderWindows.allSatisfy({ $0.folderPath == nil }) {
-            needsAutomation = true
-            lines.append(.init(text: "Non ho potuto leggere le cartelle aperte nel Finder: se chiudi quelle finestre non potrò riaprirle.", warning: true))
+            lines.append(.init(text: "Non sono riuscito a leggere le cartelle aperte nel Finder: se chiudi quelle finestre non potrò riaprirle.", tone: .info))
         }
         if windows == 0 {
             lines.append(.init(text: "Non ho trovato finestre: controlla il permesso di Accessibilità dal menu dell'ancora.", warning: true))
         }
-        var openSettings: (@MainActor () -> Void)?
-        if needsAutomation {
-            openSettings = {
-                if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation") {
-                    _ = NSWorkspace.shared.open(url)
-                }
-            }
-        }
-        let subtitle: String? = needsAutomation ? nil : "Per richiamarla: clic sull'ancora in alto, poi sul suo nome"
-        let actionTitle: String? = needsAutomation ? "Apri le impostazioni di Automazione" : nil
         onActivity?(ActivityReport(
             kind: lines.contains(where: \.warning) ? .warning : .success,
             title: "Scena “\(scene.name)” salvata",
-            subtitle: subtitle,
-            lines: lines,
-            actionTitle: actionTitle,
-            action: openSettings
+            subtitle: "Per richiamarla: clic sull'ancora in alto, poi sul suo nome",
+            lines: lines
         ))
-    }
-
-    /// Prima di leggere schede e cartelle: se macOS non dà a Ormeggio il permesso di controllare Chrome,
-    /// Safari o il Finder (succede dopo un aggiornamento dell'app), lo azzera e lo richiede da solo.
-    /// Restituisce true se ha dovuto chiederlo.
-    @discardableResult
-    private func ensureAutomation(for bundleIDs: [String]) async -> Bool {
-        let running = bundleIDs.filter { !NSRunningApplication.runningApplications(withBundleIdentifier: $0).isEmpty }
-        guard !running.isEmpty else { return false }
-        let codes = running.map { BrowserBridge.automationCode(bundleID: $0, ask: false) }
-        guard codes.contains(where: { $0 != 0 }) else { return false }
-        Log.write("Permesso Automazione da sistemare: " + zip(running, codes).map { "\($0) \($1)" }.joined(separator: ", "))
-        if codes.contains(-1743) { BrowserBridge.resetAutomation() }
-        onActivity?(ActivityReport(
-            kind: .working,
-            title: "Chiedo a macOS il permesso per leggere schede e cartelle",
-            subtitle: "Quando macOS lo chiede, premi Consenti"
-        ))
-        for bundleID in running {
-            let code = await Task.detached { BrowserBridge.automationCode(bundleID: bundleID, ask: true) }.value
-            Log.write("Permesso Automazione per \(bundleID): \(code)")
-        }
-        return true
     }
 
     /// "Schermo del Mac" per il monitor integrato, il nome per gli altri.
@@ -609,12 +592,6 @@ final class Engine {
             subtitle: "Non toccare mouse e tastiera: ci vuole qualche secondo"
         )
         onActivity?(workingReport)
-        let scriptedApps = Set(scene.windows.map(\.bundleID)).filter {
-            $0 == BrowserBridge.chromeID || $0 == BrowserBridge.safariID || $0 == FinderBridge.bundleID
-        }
-        if await ensureAutomation(for: Array(scriptedApps)) {
-            onActivity?(workingReport)
-        }
         let mouse = Input.mouseLocation
         Log.write("Richiamo la scena \"\(scene.name)\"")
 
@@ -799,7 +776,7 @@ final class Engine {
                 notes.append(.init(text: "Zoom di Chrome già come nella scena"))
             }
             if !chromeZoom.failed.isEmpty {
-                notes.append(.init(text: "Zoom di Chrome non rimesso su " + Engine.shortList(chromeZoom.failed) + ": non trovo la scheda nel profilo giusto.", warning: true))
+                notes.append(.init(text: "Zoom di Chrome non rimesso su " + Engine.shortList(chromeZoom.failed) + ".", warning: true))
             }
         }
 
@@ -935,11 +912,10 @@ final class Engine {
         return unique.count > 3 ? "\(shown) e altri \(unique.count - 3)" : shown
     }
 
-    /// Rimette lo zoom di Chrome dei siti della scena.
-    /// I siti con uno zoom diverso dal normale li sistemo sempre: Chrome scrive le preferenze
-    /// con qualche secondo di ritardo, quindi quello che leggo può non essere aggiornato.
-    /// Lo zoom di Chrome vale per sito e per profilo: prima di cambiarlo controllo che la finestra
-    /// in primo piano sia del profilo giusto.
+    /// Rimette lo zoom di Chrome dei siti della scena, dove è diverso da quello che Chrome ha salvato.
+    /// Lo zoom di Chrome vale per sito e per profilo: per cambiarlo apro un momento una finestra del sito
+    /// nel profilo giusto, sistemo lo zoom con i comandi del menu Vista e la richiudo.
+    /// Le finestre aperte restano come sono e non serve nessun permesso oltre all'Accessibilità.
     private func applyChromeZoom(_ scene: SavedScene, displays: [LiveDisplay], profiles: [ChromeProfile]) async -> (applied: [String], failed: [String]) {
         var applied: [String] = []
         var failed: [String] = []
@@ -949,51 +925,15 @@ final class Engine {
             let current = BrowserBridge.chromeZoomLevels(profile: profile)
             for (host, level) in hosts.sorted(by: { $0.key < $1.key }) {
                 let now = current.hosts[host] ?? current.defaultLevel
-                let custom = abs(level - current.defaultLevel) > 0.01
-                guard custom || abs(now - level) > 0.01 else { continue }
-                // La finestra della scena con quel sito, nel profilo giusto.
-                let saved = scene.windows.first { window in
-                    window.bundleID == BrowserBridge.chromeID
-                        && (window.chromeProfile ?? profile) == profile
-                        && (window.tabs ?? []).contains { BrowserBridge.host(of: $0) == host }
-                }
-                let frame = saved.flatMap { window in
-                    displays.first(where: { $0.key == window.displayKey }).map {
-                        self.targetFrame(for: window, on: $0, scene: scene)
-                    }
-                }
-                let candidates = BrowserBridge.chromeCandidates(host: host, tabs: saved?.tabs ?? [], near: frame)
-                guard !candidates.isEmpty else {
-                    Log.write("Zoom di Chrome su \(host): nessuna scheda aperta con questo sito")
-                    continue
-                }
-                // Il profilo lo verifico solo se so di quale profilo era la finestra salvata.
-                let checkProfile = profiles.count > 1 && saved?.chromeProfile != nil
-                var focused = false
-                var previousTab: Int?
-                for candidate in candidates.prefix(5) {
-                    guard case .focused(let previous) = BrowserBridge.focusChromeTab(in: candidate, host: host) else { continue }
-                    await Input.pause(0.8)
-                    if checkProfile, let front = BrowserBridge.frontChromeProfile(pid: chrome.processIdentifier, profiles: profiles), front != profile {
-                        Log.write("Zoom di Chrome su \(host): la finestra \"\(candidate.title)\" è del profilo \(front), cerco quella del profilo \(profile)")
-                        if let previous { BrowserBridge.restoreChromeTab(previous) }
-                        continue
-                    }
-                    focused = true
-                    previousTab = previous
-                    break
-                }
-                guard focused else {
-                    Log.write("Zoom di Chrome su \(host): nessuna finestra del profilo \(profile) con questo sito")
-                    failed.append(host)
-                    continue
-                }
+                guard abs(now - level) > 0.01 else { continue }
+                // Una pagina di quel sito salvata nella scena; per le riunioni la pagina principale del sito.
+                let pages = scene.windows
+                    .filter { $0.bundleID == BrowserBridge.chromeID && ($0.chromeProfile ?? profile) == profile }
+                    .flatMap { $0.tabs ?? [] }
+                let address = pages.first { BrowserBridge.host(of: $0) == host && !BrowserBridge.isMeeting($0) } ?? "https://\(host)/"
                 let steps = BrowserBridge.chromeSteps(from: current.defaultLevel, to: level)
-                let done = await ZoomManager.setZoom(pid: chrome.processIdentifier, steps: steps, appName: "Chrome \(host)")
-                if let previousTab {
-                    await Input.pause(0.2)
-                    BrowserBridge.restoreChromeTab(previousTab)
-                }
+                let done = await zoomInTemporaryWindow(address: address, profile: profile, steps: steps,
+                                                       pid: chrome.processIdentifier, profiles: profiles)
                 Log.write("Zoom di Chrome su \(host) (profilo \(profile)): da \(Engine.percent(now))% a \(Engine.percent(level))% \(done ? "applicato" : "NON applicato")")
                 if done {
                     applied.append("\(host) al \(Engine.percent(level))%")
@@ -1003,6 +943,42 @@ final class Engine {
             }
         }
         return (applied, failed)
+    }
+
+    /// Apre una finestra di Chrome sul sito nel profilo indicato, ne sistema lo zoom e la chiude.
+    private func zoomInTemporaryWindow(address: String, profile: String, steps: Int,
+                                       pid: pid_t, profiles: [ChromeProfile]) async -> Bool {
+        let before = BrowserBridge.focusedChromeWindow(pid: pid)?.id
+        BrowserBridge.openChromeWindow(profile: profile, urls: [address])
+        var opened: CGWindowID?
+        for _ in 0..<24 {
+            await Input.pause(0.25)
+            if let front = BrowserBridge.focusedChromeWindow(pid: pid), let id = front.id, id != before {
+                opened = id
+                break
+            }
+        }
+        guard let opened else {
+            Log.write("Zoom di Chrome: la finestra per \(address) non si è aperta")
+            return false
+        }
+        // Lascio caricare la pagina: Chrome applica lo zoom al sito della pagina mostrata.
+        await Input.pause(2)
+        var done = false
+        let front = BrowserBridge.focusedChromeWindow(pid: pid)
+        let frontProfile = BrowserBridge.profile(fromTitle: front?.title ?? "", profiles: profiles)
+        if profiles.count > 1, let frontProfile, frontProfile != profile {
+            Log.write("Zoom di Chrome: la finestra aperta è del profilo \(frontProfile) invece di \(profile)")
+        } else if front?.id == opened {
+            done = await ZoomManager.setZoom(pid: pid, steps: steps, appName: "Chrome")
+            await Input.pause(0.3)
+        } else {
+            Log.write("Zoom di Chrome: la finestra aperta non è più in primo piano")
+        }
+        if !BrowserBridge.closeWindow(id: opened, pid: pid) {
+            Log.write("Zoom di Chrome: non riesco a chiudere la finestra aperta per lo zoom")
+        }
+        return done
     }
 
     func setAppZoom(id: UUID, _ values: [String: Int]) {
@@ -1262,6 +1238,8 @@ final class Engine {
         lines.append("macOS: \(ProcessInfo.processInfo.operatingSystemVersionString)")
         lines.append("Accessibilità: \(WindowManager.isTrusted(prompt: false) ? "concessa" : "NON concessa")")
         lines.append("Automazione Chrome: \(BrowserBridge.automationStatus(bundleID: BrowserBridge.chromeID)) · Finder: \(BrowserBridge.automationStatus(bundleID: FinderBridge.bundleID))")
+        let sessions = ChromeSession.windows(profiles: BrowserBridge.chromeProfiles())
+        lines.append("Chrome dai file di sessione: \(sessions.count) finestre, \(sessions.reduce(0) { $0 + $1.tabs.count }) schede (" + Set(sessions.map(\.profile)).sorted().joined(separator: ", ") + ")")
         lines.append("Lettura scrivanie: \(SpacesManager.isAvailable ? "disponibile" : "non disponibile")")
         lines.append("Scorciatoie ctrl + frecce: \(Engine.desktopShortcutsEnabled ? "attive" : "DISATTIVATE")")
         lines.append("Impronta monitor: \(DisplayManager.fingerprint(displays))")

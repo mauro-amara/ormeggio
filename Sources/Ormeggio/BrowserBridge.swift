@@ -306,6 +306,25 @@ enum BrowserBridge {
         return .focused(previousTab: previous == tabIndex + 1 ? nil : previous)
     }
 
+    /// Finestra di Chrome in primo piano: numero e titolo.
+    static func focusedChromeWindow(pid: pid_t) -> (id: CGWindowID?, title: String)? {
+        let app = AXUIElementCreateApplication(pid)
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(app, kAXFocusedWindowAttribute as CFString, &value) == .success,
+              let ref = value, CFGetTypeID(ref) == AXUIElementGetTypeID() else { return nil }
+        let window = ref as! AXUIElement
+        return (WindowManager.windowID(of: window), WindowManager.stringAttribute(window, kAXTitleAttribute) ?? "")
+    }
+
+    /// Chiude una finestra premendo il suo pulsante rosso. Solo quella indicata, mai un'altra.
+    static func closeWindow(id: CGWindowID, pid: pid_t) -> Bool {
+        guard let live = WindowManager.resolve(windowID: id, pid: pid) else { return false }
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(live.element, kAXCloseButtonAttribute as CFString, &value) == .success,
+              let ref = value, CFGetTypeID(ref) == AXUIElementGetTypeID() else { return false }
+        return AXUIElementPerformAction(ref as! AXUIElement, kAXPressAction as CFString) == .success
+    }
+
     /// Profilo della finestra di Chrome in primo piano, dal suo titolo.
     static func frontChromeProfile(pid: pid_t, profiles: [ChromeProfile]) -> String? {
         let app = AXUIElementCreateApplication(pid)
