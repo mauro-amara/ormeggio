@@ -478,17 +478,23 @@ final class Engine {
         if windows == 0 {
             lines.append(.init(text: "Non ho trovato finestre: controlla il permesso di Accessibilità dal menu dell'ancora.", warning: true))
         }
-        onActivity?(ActivityReport(
-            kind: lines.contains(where: \.warning) ? .warning : .success,
-            title: "Scena “\(scene.name)” salvata",
-            subtitle: needsAutomation ? nil : "Per richiamarla: clic sull'ancora in alto, poi sul suo nome",
-            lines: lines,
-            actionTitle: needsAutomation ? "Apri le impostazioni di Automazione" : nil,
-            action: needsAutomation ? {
+        var openSettings: (@MainActor () -> Void)?
+        if needsAutomation {
+            openSettings = {
                 if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation") {
                     _ = NSWorkspace.shared.open(url)
                 }
-            } : nil
+            }
+        }
+        let subtitle: String? = needsAutomation ? nil : "Per richiamarla: clic sull'ancora in alto, poi sul suo nome"
+        let actionTitle: String? = needsAutomation ? "Apri le impostazioni di Automazione" : nil
+        onActivity?(ActivityReport(
+            kind: lines.contains(where: \.warning) ? .warning : .success,
+            title: "Scena “\(scene.name)” salvata",
+            subtitle: subtitle,
+            lines: lines,
+            actionTitle: actionTitle,
+            action: openSettings
         ))
     }
 
@@ -873,16 +879,22 @@ final class Engine {
         let hasWarnings = lines.contains(where: \.warning)
         let sceneName = scene.name
         let sceneAuto = scene.autoApply
-        onActivity?(ActivityReport(
-            kind: hasWarnings ? .warning : .success,
-            title: hasWarnings ? "“\(sceneName)”: qualcosa non è tornato" : "“\(sceneName)” è al suo posto",
-            subtitle: nil,
-            lines: lines,
-            actionTitle: stale ? "Aggiorna “\(sceneName)” con il Mac com'è adesso" : nil,
-            action: stale ? { [weak self] in
+        var updateScene: (@MainActor () -> Void)?
+        if stale {
+            updateScene = { [weak self] in
                 guard let self else { return }
                 Task { @MainActor in await self.saveScene(name: sceneName, autoApply: sceneAuto) }
-            } : nil
+            }
+        }
+        let title = hasWarnings ? "“\(sceneName)”: qualcosa non è tornato" : "“\(sceneName)” è al suo posto"
+        let actionTitle: String? = stale ? "Aggiorna “\(sceneName)” con il Mac com'è adesso" : nil
+        onActivity?(ActivityReport(
+            kind: hasWarnings ? .warning : .success,
+            title: title,
+            subtitle: nil,
+            lines: lines,
+            actionTitle: actionTitle,
+            action: updateScene
         ))
     }
 
