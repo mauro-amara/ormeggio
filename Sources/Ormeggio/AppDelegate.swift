@@ -11,6 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         self?.saveScene()
     }
     private let updater = Updater()
+    private var trustTimer: Timer?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -32,9 +33,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } else if UserDefaults.standard.string(forKey: "updatedFrom") != nil {
             showUpdateCompleted()
         } else if !WindowManager.isTrusted(prompt: false) {
-            _ = WindowManager.isTrusted(prompt: true)
+            repairPermission(atLaunch: true)
         }
         engine.start()
+        watchPermission()
         updater.onChange = { [weak self] in self?.updateIcon() }
         updater.start()
     }
@@ -58,17 +60,59 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         alert.addButton(withTitle: "Continua")
         NSApp.activate()
         _ = alert.runModal()
-        // Tolgo il permesso della versione precedente, così macOS mostra Ormeggio da riattivare.
+        resetAndAskPermission()
+    }
+
+    // MARK: Permesso di Accessibilità
+
+    /// Toglie la voce di Accessibilità della versione precedente e la richiede per questa.
+    /// Serve quando l'interruttore in Impostazioni risulta acceso ma macOS lo collega all'app vecchia.
+    private func resetAndAskPermission() {
         if let bundleID = Bundle.main.bundleIdentifier {
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
             process.arguments = ["reset", "Accessibility", bundleID]
             try? process.run()
             process.waitUntilExit()
+            Log.write("Voce di Accessibilità azzerata (esito \(process.terminationStatus))")
         }
         if !WindowManager.isTrusted(prompt: true) {
             openAccessibilitySettings()
         }
+        watchPermission()
+    }
+
+    @objc private func repairPermissionFromMenu() {
+        repairPermission(atLaunch: false)
+    }
+
+    private func repairPermission(atLaunch: Bool) {
+        let alert = NSAlert()
+        alert.messageText = "Ormeggio non ha il permesso di Accessibilità"
+        alert.informativeText = "Se nell'elenco Ormeggio risulta già attivo, macOS lo sta collegando a una versione precedente dell'app.\n\nPremi \"Ripara\": tolgo la voce vecchia e si apre Impostazioni di Sistema. Riattiva Ormeggio nell'elenco. L'icona in alto perde il \"!\" appena macOS conferma."
+        alert.addButton(withTitle: "Ripara")
+        alert.addButton(withTitle: atLaunch ? "Più tardi" : "Annulla")
+        NSApp.activate()
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        resetAndAskPermission()
+    }
+
+    /// Controlla il permesso ogni 2 secondi finché manca, così l'icona si aggiorna da sola.
+    private func watchPermission() {
+        guard trustTimer == nil, !WindowManager.isTrusted(prompt: false) else { return }
+        trustTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+            guard let self else { return }
+            Task { @MainActor in self.permissionTick() }
+        }
+    }
+
+    private func permissionTick() {
+        guard WindowManager.isTrusted(prompt: false) else { return }
+        trustTimer?.invalidate()
+        trustTimer = nil
+        Log.write("Permesso di Accessibilità concesso")
+        engine.refreshState()
+        updateIcon()
     }
 
     @objc private func installUpdate() {
@@ -144,6 +188,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if !WindowManager.isTrusted(prompt: true) {
             openAccessibilitySettings()
         }
+        watchPermission()
         scenesWindow.show()
     }
 
@@ -198,7 +243,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.addItem(infoItem(active.map { "Scena attiva: \($0.name)" } ?? "Nessuna scena attiva"))
         }
         if !WindowManager.isTrusted(prompt: false) {
-            menu.addItem(commandItem("⚠︎ Attiva Ormeggio in Accessibilità…", #selector(openAccessibilitySettings)))
+            menu.addItem(commandItem("⚠︎ Ripara il permesso di Accessibilità…", #selector(repairPermissionFromMenu)))
         }
 
         // Monitor riconosciuti da macOS, con risoluzione e scrivanie.
@@ -300,8 +345,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func saveScene() {
         guard WindowManager.isTrusted(prompt: false) else {
-            showMessage("Manca un permesso", "Per salvare le finestre Ormeggio deve essere attivo in Impostazioni di Sistema > Privacy e sicurezza > Accessibilità.")
-            openAccessibilitySettings()
+            repairPermission(atLaunch: false)
             return
         }
         let nameField = NSTextField(frame: NSRect(x: 0, y: 30, width: 340, height: 24))
