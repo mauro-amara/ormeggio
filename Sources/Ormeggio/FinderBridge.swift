@@ -86,7 +86,8 @@ enum FinderBridge {
     static func open(folder path: String) {
         // Non controllo la cartella prima: per quelle in Scrivania o Documenti macOS chiederebbe un permesso.
         // La apre il Finder, che può.
-        if !NSWorkspace.shared.open(URL(fileURLWithPath: path, isDirectory: true)) {
+        // Mostro la cartella nel Finder: così non apro mai un'app o un documento che si trovasse a quel percorso.
+        if !NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: path) {
             Log.write("Cartella non aperta: \(path)")
         }
     }

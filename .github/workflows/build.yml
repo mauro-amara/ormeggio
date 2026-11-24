@@ -12,7 +12,16 @@ jobs:
   build:
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      # Niente azioni di terzi: scarico il codice con git, così la compilazione dipende solo da GitHub e da Apple.
+      - name: Scarica il codice
+        shell: bash
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git init -q .
+          git remote add origin "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git fetch -q --depth 1 origin "$GITHUB_SHA"
+          git checkout -q FETCH_HEAD
 
       - name: Versione di Swift
         run: swift --version
@@ -26,18 +35,28 @@ jobs:
       - name: Crea il DMG
         run: bash scripts/make-dmg.sh
 
-      - name: Allega il DMG all'esecuzione
-        uses: actions/upload-artifact@v4
-        with:
-          name: Ormeggio-dmg
-          path: dist/*.dmg
-          retention-days: 30
+      # Gli stessi controlli che fa l'app prima di installare un aggiornamento: se qui non passano,
+      # la versione non viene pubblicata e nessuno resta bloccato.
+      - name: Controlla l'app nel DMG
+        shell: bash
+        run: |
+          set -euo pipefail
+          DMG=$(ls dist/*.dmg)
+          MNT=$(mktemp -d)
+          hdiutil attach "$DMG" -nobrowse -noautoopen -readonly -mountpoint "$MNT" >/dev/null
+          ditto "$MNT/Ormeggio.app" "$RUNNER_TEMP/verifica.app"
+          hdiutil detach "$MNT" -force >/dev/null
+          codesign --verify --deep --strict "$RUNNER_TEMP/verifica.app"
+          test "$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$RUNNER_TEMP/verifica.app/Contents/Info.plist")" = "com.sparkfabrik.ormeggio"
+          echo "App nel DMG verificata"
 
       # Versione riuscita: DMG e latest.json nel ramo "builds", da cui l'app scarica gli aggiornamenti.
       # Versione fallita: solo il registro, nel ramo "builds-failed", senza toccare l'ultima versione buona.
       - name: Pubblica
         if: always()
         shell: bash
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" Resources/Info.plist)
           BUILD=$(/usr/libexec/PlistBuddy -c "Print CFBundleVersion" Resources/Info.plist)
@@ -52,7 +71,8 @@ jobs:
           if [ "${{ job.status }}" = "success" ] && ls dist/*.dmg >/dev/null 2>&1; then
             BRANCH=builds
             cp dist/*.dmg out/
-            printf '{"version":"%s","build":%s,"dmg":"Ormeggio-%s.dmg","notes":%s}\n' "$VERSION" "$BUILD" "$VERSION" "$NOTES" > out/latest.json
+            SHA=$(shasum -a 256 "dist/Ormeggio-$VERSION.dmg" | cut -d' ' -f1)
+            printf '{"version":"%s","build":%s,"dmg":"Ormeggio-%s.dmg","sha256":"%s","notes":%s}\n' "$VERSION" "$BUILD" "$VERSION" "$SHA" "$NOTES" > out/latest.json
           fi
           cd out
           git init -q -b "$BRANCH"
@@ -60,4 +80,4 @@ jobs:
           git config user.email "ci@users.noreply.github.com"
           git add .
           git commit -qm "Build ${GITHUB_SHA::7}: ${{ job.status }}"
-          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" "$BRANCH"
+          git push -q -f "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$BRANCH"

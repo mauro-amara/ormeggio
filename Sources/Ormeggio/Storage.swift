@@ -4,7 +4,10 @@ enum Paths {
     static let folder: URL = {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         let url = base.appendingPathComponent("Ormeggio", isDirectory: true)
-        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        // Cartella leggibile solo dalla persona: dentro ci sono titoli di finestre e indirizzi delle schede.
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true,
+                                                 attributes: [.posixPermissions: 0o700])
+        try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: url.path)
         return url
     }()
 
@@ -13,16 +16,30 @@ enum Paths {
 }
 
 enum Log {
+    /// Oltre questa dimensione il registro tiene solo la seconda metà.
+    private static let maxBytes = 1_000_000
+
     static func write(_ message: String) {
         let stamp = ISO8601DateFormatter().string(from: Date())
         guard let data = "\(stamp) \(message)\n".data(using: .utf8) else { return }
+        rotateIfNeeded()
         if let handle = try? FileHandle(forWritingTo: Paths.log) {
             handle.seekToEndOfFile()
             handle.write(data)
             try? handle.close()
         } else {
             try? data.write(to: Paths.log)
+            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: Paths.log.path)
         }
+    }
+
+    private static func rotateIfNeeded() {
+        guard let size = (try? FileManager.default.attributesOfItem(atPath: Paths.log.path))?[.size] as? Int,
+              size > maxBytes, let data = try? Data(contentsOf: Paths.log) else { return }
+        var tail = data.suffix(maxBytes / 2)
+        if let newline = tail.firstIndex(of: 10) { tail = tail[(newline + 1)...] }
+        try? Data(tail).write(to: Paths.log, options: .atomic)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: Paths.log.path)
     }
 }
 
@@ -56,6 +73,7 @@ final class SceneStore {
         do {
             let data = try encoder.encode(scenes)
             try data.write(to: Paths.scenes, options: .atomic)
+            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: Paths.scenes.path)
         } catch {
             Log.write("Errore nel salvataggio delle scene: \(error)")
         }

@@ -107,7 +107,7 @@ enum BrowserBridge {
     }
 
     /// Riconosce il profilo dal titolo della finestra: macOS lo aggiunge in fondo, per esempio
-    /// "Gmail - Mauro (sparkfabrik.com)" oppure "Gmail - Caleffi".
+    /// "Gmail - Mario (azienda.it)" oppure "Gmail - Lavoro".
     static func profile(fromTitle title: String, profiles: [ChromeProfile]) -> String? {
         guard profiles.count > 1 else { return profiles.first?.directory }
         guard !title.isEmpty else { return nil }
@@ -341,6 +341,7 @@ enum BrowserBridge {
     /// Apre le schede indicate nella finestra di Chrome del profilo usata per ultima
     /// (quella appena messa in primo piano), senza aprire una finestra nuova.
     static func openChromeTabs(profile: String?, urls: [String]) {
+        let urls = webAddresses(urls)
         guard !urls.isEmpty else { return }
         var arguments = ["-na", "Google Chrome", "--args"]
         if let profile { arguments.append("--profile-directory=\(profile)") }
@@ -357,6 +358,8 @@ enum BrowserBridge {
 
     /// Apre una nuova finestra di Chrome nel profilo indicato, con le schede indicate.
     static func openChromeWindow(profile: String?, urls: [String]) {
+        let urls = webAddresses(urls)
+        guard !urls.isEmpty else { return }
         var arguments = ["-na", "Google Chrome", "--args"]
         if let profile { arguments.append("--profile-directory=\(profile)") }
         arguments.append("--new-window")
@@ -373,6 +376,7 @@ enum BrowserBridge {
 
     /// Apre una nuova finestra di Safari con le schede indicate.
     static func openSafariWindow(urls: [String]) {
+        let urls = webAddresses(urls)
         guard let first = urls.first else { return }
         var source = "tell application \"Safari\"\n"
         source += "make new document with properties {URL:\"\(escape(first))\"}\n"
@@ -385,6 +389,15 @@ enum BrowserBridge {
         }
         source += "end tell"
         _ = run(source)
+    }
+
+    /// Solo indirizzi web: niente che il browser potrebbe leggere come un'opzione (per esempio "--qualcosa")
+    /// o come un comando (javascript:, file:).
+    static func webAddresses(_ urls: [String]) -> [String] {
+        urls.filter { address in
+            guard let url = URL(string: address), let scheme = url.scheme?.lowercased(), url.host != nil else { return false }
+            return scheme == "https" || scheme == "http"
+        }
     }
 
     // MARK: AppleScript

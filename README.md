@@ -64,6 +64,14 @@ Icona di Ormeggio > **Invia segnalazione**. Un clic e basta: Ormeggio apre Gmail
 
 Icona di Ormeggio > Impostazioni > **Disinstalla Ormeggio…**. Toglie l'avvio all'accensione, le scene salvate, i permessi e sposta l'app nel Cestino.
 
+## Sicurezza e dati
+
+- **Permessi.** Ormeggio usa l'Accessibilità per spostare le finestre e, se concessa, l'Automazione per leggere schede e cartelle. Non chiede altro: niente registrazione dello schermo, niente accesso ai file.
+- **Dati.** Scene e registro stanno in `~/Library/Application Support/Ormeggio`, leggibili solo dalla persona. Non escono dal Mac, tranne quando la persona preme "Invia segnalazione". Nel registro ci sono i titoli delle finestre e i nomi dei siti, mai gli indirizzi completi delle schede.
+- **Aggiornamenti.** Si scaricano solo da questo repository, in HTTPS. Prima di installare, Ormeggio controlla che il file sia identico a quello pubblicato (impronta SHA-256), che contenga proprio Ormeggio nella versione annunciata e che la firma sia intatta. Se un controllo non passa, l'aggiornamento non si installa. La compilazione usa solo git e gli strumenti di Apple, senza azioni di terzi, e fa gli stessi controlli prima di pubblicare.
+- **Limite noto.** L'app è firmata localmente, non con un certificato Developer ID di Apple. La sicurezza degli aggiornamenti dipende quindi dall'account GitHub che pubblica. Il passo successivo è firmare e notarizzare con l'account sviluppatore dell'azienda.
+- **Segnalazioni.** Partono solo quando la persona preme "Invia segnalazione". Con l'invio diretto sono cifrate (X25519 e ChaCha20-Poly1305) prima di uscire dal Mac, e solo chi ha la chiave privata le può leggere.
+
 ## Cosa fa
 
 | Cosa | Come |

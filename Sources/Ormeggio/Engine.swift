@@ -1006,7 +1006,8 @@ final class Engine {
             }
             BrowserBridge.openChromeTabs(profile: saved.chromeProfile ?? assignments[index].tracked.chromeProfile, urls: missingTabs)
             await Input.pause(0.3)
-            Log.write("Schede riaperte in \"\(saved.title)\": " + missingTabs.joined(separator: " "))
+            // Nel registro solo i siti: gli indirizzi completi possono contenere codici di accesso.
+            Log.write("Schede riaperte in \"\(saved.title)\": \(missingTabs.count) di " + Set(missingTabs.compactMap { BrowserBridge.host(of: $0) }).sorted().joined(separator: ", "))
             tabsReopened.append("\(windowName(saved, profiles: profiles)) (\(missingTabs.count))")
         }
         if !tabsReopened.isEmpty {

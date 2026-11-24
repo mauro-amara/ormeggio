@@ -1,4 +1,5 @@
 import AppKit
+import CryptoKit
 
 /// Descrizione dell'ultima versione pubblicata (file latest.json nel ramo builds).
 struct UpdateInfo: Decodable {
@@ -6,18 +7,22 @@ struct UpdateInfo: Decodable {
     let build: Int
     let dmg: String
     let notes: String?
+    /// Impronta SHA-256 del DMG, scritta dalla compilazione: il file scaricato deve essere identico.
+    let sha256: String?
 }
 
 enum UpdateError: LocalizedError {
     case download
     case command(String)
     case notWritable
+    case invalid(String)
 
     var errorDescription: String? {
         switch self {
         case .download: return "non riesco a scaricare la nuova versione"
         case .command(let name): return "il comando \(name) non è riuscito"
         case .notWritable: return "non posso sostituire l'app in questa cartella"
+        case .invalid(let reason): return "la versione scaricata non supera i controlli (\(reason))"
         }
     }
 }
@@ -99,14 +104,29 @@ final class Updater {
             throw UpdateError.notWritable
         }
 
+        // Il nome del file arriva da internet: lo accetto solo nella forma prevista, senza cartelle.
+        guard info.dmg.range(of: #"^Ormeggio-[0-9]+(\.[0-9]+)*\.dmg$"#, options: .regularExpression) != nil else {
+            throw UpdateError.invalid("nome del file")
+        }
+        guard let expectedHash = info.sha256?.lowercased(), expectedHash.count == 64 else {
+            throw UpdateError.invalid("manca l'impronta del file")
+        }
+
         let work = manager.temporaryDirectory.appendingPathComponent("ormeggio-update-\(UUID().uuidString)")
-        try manager.createDirectory(at: work, withIntermediateDirectories: true)
+        try manager.createDirectory(at: work, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
 
         guard let remote = URL(string: Updater.feedBase + info.dmg) else { throw UpdateError.download }
         let (downloaded, response) = try await URLSession.shared.download(from: remote)
         guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw UpdateError.download }
         let dmg = work.appendingPathComponent(info.dmg)
         try manager.moveItem(at: downloaded, to: dmg)
+
+        // Il DMG deve essere esattamente quello pubblicato dalla compilazione.
+        let digest = SHA256.hash(data: try Data(contentsOf: dmg)).map { String(format: "%02x", $0) }.joined()
+        guard digest == expectedHash else {
+            try? manager.removeItem(at: work)
+            throw UpdateError.invalid("impronta diversa")
+        }
 
         let mount = work.appendingPathComponent("volume")
         try manager.createDirectory(at: mount, withIntermediateDirectories: true)
@@ -120,22 +140,41 @@ final class Updater {
         }
         _ = try? Updater.run("/usr/bin/hdiutil", ["detach", mount.path, "-force"])
 
-        // Lo script aspetta che Ormeggio si chiuda, sostituisce l'app e la riapre.
+        // L'app scaricata deve essere Ormeggio, della versione annunciata, con la firma intatta.
+        let plist = NSDictionary(contentsOf: staged.appendingPathComponent("Contents/Info.plist"))
+        guard plist?["CFBundleIdentifier"] as? String == Bundle.main.bundleIdentifier,
+              plist?["CFBundleVersion"] as? String == String(info.build) else {
+            throw UpdateError.invalid("app diversa da quella annunciata")
+        }
+        do {
+            try Updater.run("/usr/bin/codesign", ["--verify", "--deep", "--strict", staged.path])
+        } catch {
+            throw UpdateError.invalid("firma non valida")
+        }
+
+        // Lo script aspetta che Ormeggio si chiuda, mette la versione nuova accanto a quella vecchia,
+        // le scambia e riapre Ormeggio. Se qualcosa va storto rimette la vecchia.
+        // I percorsi gli arrivano come argomenti, mai dentro il testo dello script.
         let script = """
         #!/bin/bash
-        while kill -0 \(ProcessInfo.processInfo.processIdentifier) 2>/dev/null; do sleep 0.3; done
-        rm -rf "\(target)"
-        /usr/bin/ditto "\(staged.path)" "\(target)"
-        /usr/bin/xattr -dr com.apple.quarantine "\(target)" 2>/dev/null
-        /usr/bin/open "\(target)"
-        rm -rf "\(work.path)"
+        pid="$1"; target="$2"; staged="$3"; work="$4"
+        case "$target" in *.app) ;; *) exit 1 ;; esac
+        while kill -0 "$pid" 2>/dev/null; do sleep 0.3; done
+        if ! /usr/bin/ditto "$staged" "$target.nuova"; then rm -rf "$target.nuova"; /usr/bin/open "$target"; exit 1; fi
+        if mv "$target" "$work/precedente.app"; then
+          if ! mv "$target.nuova" "$target"; then mv "$work/precedente.app" "$target"; fi
+        fi
+        /usr/bin/xattr -dr com.apple.quarantine "$target" 2>/dev/null
+        /usr/bin/open "$target"
+        rm -rf "$work" "$target.nuova"
         """
         let scriptURL = work.appendingPathComponent("installa.sh")
         try script.write(to: scriptURL, atomically: true, encoding: .utf8)
         // Lo script parte staccato da Ormeggio, così continua anche quando Ormeggio si chiude.
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/bash")
-        process.arguments = ["-c", "nohup /bin/bash \"\(scriptURL.path)\" >/dev/null 2>&1 &"]
+        process.arguments = ["-c", "nohup /bin/bash \"$0\" \"$1\" \"$2\" \"$3\" \"$4\" >/dev/null 2>&1 &",
+                             scriptURL.path, String(ProcessInfo.processInfo.processIdentifier), target, staged.path, work.path]
         try process.run()
         process.waitUntilExit()
 
