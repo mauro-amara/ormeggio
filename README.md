@@ -27,6 +27,7 @@ mkdir -p /tmp/ormeggio-dmg && \
 curl -fsSL https://raw.githubusercontent.com/mauro-amara/ormeggio/builds/latest.json -o /tmp/ormeggio.json && \
 DMG=$(plutil -extract dmg raw -o - /tmp/ormeggio.json) && \
 curl -fL "https://raw.githubusercontent.com/mauro-amara/ormeggio/builds/$DMG" -o /tmp/Ormeggio.dmg && \
+echo "$(plutil -extract sha256 raw -o - /tmp/ormeggio.json)  /tmp/Ormeggio.dmg" | shasum -a 256 -c - && \
 hdiutil attach /tmp/Ormeggio.dmg -nobrowse -readonly -mountpoint /tmp/ormeggio-dmg && \
 (pkill -x Ormeggio || true) && sleep 1 && \
 rm -rf /Applications/Ormeggio.app && \
@@ -58,7 +59,7 @@ Ormeggio controlla ogni mezz'ora se c'è una versione nuova e la installa da sol
 
 ### Se qualcosa non va
 
-Icona di Ormeggio > **Invia segnalazione**. Un clic e basta: Ormeggio apre Gmail con la diagnostica già scritta e la spedisce da solo. Claude la riceve, corregge e pubblica la versione nuova, che arriva a tutti con la notifica. La diagnostica contiene il registro delle ultime operazioni e i titoli delle finestre, non gli indirizzi delle schede.
+Icona di Ormeggio > **Invia segnalazione**. Con l'invio diretto attivo la segnalazione parte cifrata in un secondo, senza aprire niente: Claude la riceve, corregge e pubblica la versione nuova, che arriva a tutti con la notifica. Finché l'invio diretto non è attivo, Ormeggio prepara un file e lo mostra nel Finder: trascinalo nella chat con Claude. La diagnostica contiene il registro delle ultime operazioni e i titoli delle finestre, non gli indirizzi delle schede.
 
 ### Disinstallare
 

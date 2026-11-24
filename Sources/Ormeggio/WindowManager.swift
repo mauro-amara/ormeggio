@@ -188,7 +188,14 @@ enum WindowManager {
     /// poi nella barra in alto. Il punto vecchio (sopra il pulsante verde) su macOS Tahoe cade
     /// nel bordo da cui la finestra si ridimensiona.
     static func grabCandidates(of window: LiveWindow, frame: CGRect) -> [CGPoint] {
-        var points: [CGPoint] = []
+        // Prima la parte destra della barra in alto, dove di solito non c'è niente (in Chrome dopo l'ultima scheda),
+        // poi il bordo più alto della finestra. Subito dopo i pulsanti della finestra in Chrome c'è la prima scheda:
+        // trascinarla sposta la scheda, non la finestra.
+        var points: [CGPoint] = [
+            CGPoint(x: frame.maxX - 160, y: frame.minY + 12),
+            CGPoint(x: frame.maxX - 280, y: frame.minY + 12),
+            CGPoint(x: frame.midX, y: frame.minY + 4)
+        ]
         var value: CFTypeRef?
         if AXUIElementCopyAttributeValue(window.element, kAXZoomButtonAttribute as CFString, &value) == .success,
            let ref = value, CFGetTypeID(ref) == AXUIElementGetTypeID(),

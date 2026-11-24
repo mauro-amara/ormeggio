@@ -219,14 +219,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updateIcon()
     }
 
-    /// "Invia segnalazione": un clic e la diagnostica parte da Gmail, senza altro da fare.
+    /// "Invia segnalazione": con l'invio diretto parte cifrata in un secondo; senza, prepara il file per la chat.
     @objc private func sendReport() {
         guard !sendingReport, !engine.isWorking else { return }
         sendingReport = true
         HUD.shared.show(ActivityReport(
             kind: .working,
             title: "Invio la segnalazione…",
-            subtitle: ReportSender.hasDirectChannel ? "Ci vuole un secondo" : "Si apre Gmail e la mail parte da sola: non toccare la tastiera"
+            subtitle: "Ci vuole un secondo"
         ))
         if ReportSender.hasDirectChannel {
             let report = engine.supportReport(maxCharacters: 60000)
@@ -242,34 +242,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
             return
         }
-        let report = engine.supportReport(maxCharacters: 4500)
-        Task { @MainActor in
-            let outcome = await ReportSender.send(report: report, version: self.updater.currentVersion)
-            self.sendingReport = false
-            switch outcome {
-            case .sent:
-                HUD.shared.show(ActivityReport(
-                    kind: .success,
-                    title: "Segnalazione inviata",
-                    subtitle: "Claude la legge e corregge: la versione nuova arriva da sola, con una notifica"
-                ))
-            case .opened:
-                HUD.shared.show(ActivityReport(
-                    kind: .success,
-                    title: "Segnalazione pronta in Gmail",
-                    subtitle: "Se la mail è ancora aperta, premi Invia",
-                    offersReport: false
-                ))
-            case .noGmail:
-                HUD.shared.show(ActivityReport(
-                    kind: .warning,
-                    title: "Non sono riuscito ad aprire Gmail",
-                    subtitle: "Serve Gmail aperto nel browser con il tuo account",
-                    lines: [.init(text: "Entra in Gmail nel browser e premi di nuovo Invia segnalazione.", tone: .info)],
-                    offersReport: false
-                ))
-            }
+        // Finché l'invio diretto non è attivo: file pronto e testo negli appunti, da dare a Claude in chat.
+        // Niente Gmail: l'invio automatico della mail non era affidabile.
+        sendingReport = false
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd-HHmm"
+        let url = Paths.folder.appendingPathComponent("Ormeggio-segnalazione-\(formatter.string(from: Date())).txt")
+        let report = engine.supportReport()
+        do {
+            try report.write(to: url, atomically: true, encoding: .utf8)
+            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        } catch {
+            Log.write("Segnalazione: non riesco a salvare il file (\(error.localizedDescription))")
         }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(report, forType: .string)
+        HUD.shared.show(ActivityReport(
+            kind: .success,
+            title: "Segnalazione pronta",
+            subtitle: "Trascina nella chat con Claude il file che ho aperto nel Finder, oppure incolla (cmd V)",
+            offersReport: false
+        ))
     }
 
     @objc private func copyDiagnostics() {
