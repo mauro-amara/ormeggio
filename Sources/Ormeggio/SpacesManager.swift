@@ -129,7 +129,7 @@ enum SpacesManager {
             }
             if changed {
                 // Lascio finire l'animazione prima del passo successivo.
-                await Input.pause(0.3)
+                await Input.pause(0.2)
             } else {
                 silent += 1
                 Log.write("Cambio scrivania su \(display.name): macOS non ha risposto (\(silent))")
@@ -215,7 +215,9 @@ enum SpacesManager {
 
     /// Porta ogni monitor al numero di scrivanie richiesto. Toglie scrivanie solo dalla fine
     /// e solo se sul monitor non ci sono app a tutto schermo. Controlla il risultato e riprova una volta.
-    static func adjustSpaces(wanted: [CGDirectDisplayID: Int], displays: [LiveDisplay]) async -> (added: Int, removed: Int) {
+    /// Con allowRemove falso aggiunge soltanto. Toglie solo le scrivanie in più che sono vuote:
+    /// togliere una scrivania con finestre le butterebbe su un'altra e farebbe confusione.
+    static func adjustSpaces(wanted: [CGDirectDisplayID: Int], displays: [LiveDisplay], allowRemove: Bool) async -> (added: Int, removed: Int) {
         var added = 0
         var removed = 0
         for attempt in 1...2 {
@@ -225,14 +227,24 @@ enum SpacesManager {
             for (id, count) in wanted where count > 0 {
                 guard let have = current[id]?.count else { continue }
                 if count > have { toAdd[id] = count - have }
-                if count < have { toRemove[id] = have - count }
+                if allowRemove, count < have { toRemove[id] = have - count }
             }
             guard !toAdd.isEmpty || !toRemove.isEmpty else { break }
             Log.write("Scrivanie, tentativo \(attempt): da aggiungere \(describe(toAdd, displays)), da togliere \(describe(toRemove, displays))")
             let result = await missionControlPass(toAdd: toAdd, toRemove: toRemove, current: current, displays: displays)
             added += result.added
             removed += result.removed
-            await Input.pause(0.6)
+            await Input.pause(0.4)
+            // Se è cambiato un monitor che non dovevo toccare mi fermo: meglio una scrivania in meno che una a caso.
+            let after = layouts(for: displays)
+            let untouched = displays.filter { toAdd[$0.id] == nil && toRemove[$0.id] == nil }
+            let wrong = untouched.filter { current[$0.id]?.count != after[$0.id]?.count }
+            if !wrong.isEmpty {
+                Log.write("Scrivanie cambiate su un monitor che non dovevo toccare (\(wrong.map(\.name).joined(separator: ", "))): mi fermo")
+                break
+            }
+            // Se un tentativo non ha cambiato niente, un secondo non servirebbe.
+            if result.added == 0 && result.removed == 0 { break }
         }
         let after = layouts(for: displays)
         for display in displays {
@@ -277,7 +289,7 @@ enum SpacesManager {
         for display in displays where toAdd[display.id] != nil || toRemove[display.id] != nil {
             // Il mouse in alto apre la barra delle scrivanie di quel monitor.
             Input.moveMouse(to: CGPoint(x: display.bounds.midX, y: display.bounds.minY + 4))
-            await Input.pause(0.8)
+            await Input.pause(0.5)
             let group = displayGroups(in: dockElement)[display.id] ?? groups[display.id]
 
             if let count = toAdd[display.id] {
@@ -289,7 +301,7 @@ enum SpacesManager {
                         } else {
                             Log.write("Pulsante + su \(display.name): errore \(result.rawValue)")
                         }
-                        await Input.pause(0.6)
+                        await Input.pause(0.35)
                     }
                 } else {
                     Log.write("Pulsante per aggiungere scrivanie non trovato su \(display.name)")
@@ -321,23 +333,46 @@ enum SpacesManager {
                         Log.write("Scrivanie di \(display.name) in Mission Control: \(buttons.count), attese \(userCount)")
                         continue
                     }
-                    for button in buttons.suffix(count).reversed() {
+                    // Solo le scrivanie oltre quelle della scena, e solo se vuote.
+                    let keep = userCount - count
+                    let spaceIDs = current[display.id]?.spaceIDs ?? []
+                    let occupied = occupiedSpaces()
+                    var removable: [AXUIElement] = []
+                    for (position, button) in buttons.enumerated() where position >= keep {
+                        if let id = spaceIDs[safe: position], occupied.contains(id) {
+                            Log.write("Scrivania \(position + 1) di \(display.name): ha delle finestre, non la tolgo")
+                            continue
+                        }
+                        removable.append(button)
+                    }
+                    for button in removable.reversed() {
                         guard let action = removeAction(of: button) else {
                             Log.write("Azione per togliere la scrivania non trovata")
                             break
                         }
                         if AXUIElementPerformAction(button, action as CFString) == .success { removed += 1 }
-                        await Input.pause(0.6)
+                        await Input.pause(0.35)
                     }
                     break
                 }
             }
         }
 
-        await Input.pause(0.4)
+        await Input.pause(0.3)
         toggleMissionControl()
-        await Input.pause(0.9)
+        await Input.pause(0.6)
         return (added, removed)
+    }
+
+    /// Scrivanie su cui c'è almeno una finestra normale di un'app.
+    static func occupiedSpaces() -> Set<Int> {
+        let regular = Set(WindowManager.regularApps().map(\.processIdentifier))
+        var result = Set<Int>()
+        for window in WindowManager.systemWindows()
+        where regular.contains(window.pid) && window.alpha > 0 && window.bounds.width >= 120 && window.bounds.height >= 90 {
+            result.formUnion(spaceIDs(forWindow: window.id))
+        }
+        return result
     }
 
     /// Gruppi di Mission Control per monitor: macOS li marca con l'identificativo del monitor.
@@ -369,11 +404,8 @@ enum SpacesManager {
         }.joined(separator: " "))
         if let button = all.first(where: { isOn(display, $0) }) { return button }
         if all.count == 1, displays.count == 1 { return all[0] }
-        // Il più vicino all'angolo in alto a destra del monitor.
-        let corner = CGPoint(x: display.bounds.maxX, y: display.bounds.minY)
-        return all.min { lhs, rhs in
-            distance(WindowManager.position(of: lhs), corner) < distance(WindowManager.position(of: rhs), corner)
-        }
+        // Niente tentativi a occhio: premere il + di un altro monitor aggiungerebbe una scrivania nel posto sbagliato.
+        return nil
     }
 
     private static func distance(_ point: CGPoint?, _ target: CGPoint) -> CGFloat {

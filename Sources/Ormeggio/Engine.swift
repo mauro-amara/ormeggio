@@ -27,6 +27,28 @@ struct TrackedWindow {
     var document: String? = nil
     /// Schede aperte (Chrome), dai file di sessione.
     var tabs: [String]? = nil
+    /// Scheda in primo piano (Chrome): serve per lo zoom, che vale per il sito della scheda mostrata.
+    var activeTab: String? = nil
+}
+
+/// Tempi dei passi del richiamo, nel registro: dicono dove se ne vanno i secondi.
+@MainActor
+final class StepClock {
+    private let start = Date()
+    private var last = Date()
+
+    func mark(_ label: String) {
+        let now = Date()
+        Log.write("Tempo: \(label) \(StepClock.seconds(now.timeIntervalSince(last))) (totale \(StepClock.seconds(now.timeIntervalSince(start))))")
+        last = now
+    }
+
+    var total: TimeInterval { Date().timeIntervalSince(start) }
+
+    /// "1,8 s"
+    static func seconds(_ value: TimeInterval) -> String {
+        String(format: "%.1f s", value).replacingOccurrences(of: ".", with: ",")
+    }
 }
 
 /// Una finestra salvata abbinata alla finestra aperta che la rappresenta.
@@ -53,6 +75,15 @@ final class Engine {
 
     private var lastFingerprint: String?
     private var isBusy = false
+    /// Finestre delle altre scrivanie lette durante un richiamo: la lettura costa, la faccio una volta per app.
+    private var remoteCache: [pid_t: [CGWindowID: AXUIElement]] = [:]
+
+    private func elementsOnAllDesktops(pid: pid_t) -> [CGWindowID: AXUIElement] {
+        if let cached = remoteCache[pid] { return cached }
+        let found = WindowManager.elementsOnAllDesktops(pid: pid)
+        remoteCache[pid] = found
+        return found
+    }
     private var pendingCheck: Task<Void, Never>?
     private var observers: [NSObjectProtocol] = []
 
@@ -217,6 +248,7 @@ final class Engine {
     }
 
     private func placeLaunchedApp(_ bundleID: String, scene: SavedScene) async {
+        remoteCache = [:]
         let displays = DisplayManager.activeDisplays()
         let tracked = inventory(displays: displays, profiles: []).filter { $0.bundleID == bundleID }
         let result = match(scene.windows.filter { $0.bundleID == bundleID }, with: tracked)
@@ -224,8 +256,8 @@ final class Engine {
         isBusy = true
         refreshState()
         var assignments = result.assignments
-        await relocate(&assignments, scene: scene, displays: displays)
-        await placeFrames(&assignments, scene: scene, displays: displays)
+        await relocate(&assignments, scene: scene, displays: displays, thorough: false)
+        await placeFrames(&assignments, scene: scene, displays: displays, thorough: false)
         isBusy = false
         refreshState()
     }
@@ -233,6 +265,7 @@ final class Engine {
     // MARK: Salvataggio
 
     func saveScene(name: String, autoApply: Bool) async {
+        remoteCache = [:]
         guard !isBusy else { return }
         guard WindowManager.isTrusted(prompt: false) else {
             refreshState()
@@ -450,7 +483,7 @@ final class Engine {
         var result: [TrackedWindow] = []
         var seen = excluding
         // Titoli delle finestre di Chrome sulle altre scrivanie (servono per profilo e schede).
-        var otherDesktopWindows: [pid_t: [CGWindowID: (title: String, document: String?)]] = [:]
+        var otherDesktopWindows: [pid_t: [CGWindowID: AXUIElement]] = [:]
 
         func add(id: CGWindowID?, app: NSRunningApplication, live: LiveWindow?, frame: CGRect, title: String, spaces: [Int], document: String? = nil) {
             guard let bundleID = app.bundleIdentifier,
@@ -506,11 +539,12 @@ final class Engine {
                 var document: String?
                 if app.bundleIdentifier == BrowserBridge.chromeID || app.bundleIdentifier == FinderBridge.bundleID {
                     if otherDesktopWindows[app.processIdentifier] == nil {
-                        otherDesktopWindows[app.processIdentifier] = WindowManager.windowsOnAllDesktops(pid: app.processIdentifier)
+                        otherDesktopWindows[app.processIdentifier] = elementsOnAllDesktops(pid: app.processIdentifier)
                     }
-                    let info = otherDesktopWindows[app.processIdentifier]?[system.id]
-                    if title.isEmpty { title = info?.title ?? "" }
-                    document = info?.document
+                    if let element = otherDesktopWindows[app.processIdentifier]?[system.id] {
+                        if title.isEmpty { title = WindowManager.stringAttribute(element, kAXTitleAttribute) ?? "" }
+                        document = WindowManager.stringAttribute(element, kAXDocumentAttribute)
+                    }
                 }
                 add(id: system.id, app: app, live: nil, frame: system.bounds, title: title, spaces: spaces, document: document)
             }
@@ -647,7 +681,11 @@ final class Engine {
         Task { @MainActor in await self.apply(scene) }
     }
 
-    func apply(_ scene: SavedScene) async {
+    /// Richiama una scena.
+    /// Veloce (di base): solo quello che si fa in un attimo, senza cambiare scrivania e senza Mission Control.
+    /// Completo (thorough): aggiunge e toglie scrivanie e sposta le finestre tra le scrivanie, che costa
+    /// mezzo secondo per ogni cambio di scrivania. Parte solo se la persona lo chiede dal riquadro.
+    func apply(_ scene: SavedScene, thorough: Bool = false) async {
         guard !isBusy else { return }
         guard WindowManager.isTrusted(prompt: false) else {
             Log.write("Scena \"\(scene.name)\" non richiamata: manca il permesso di Accessibilità")
@@ -671,7 +709,9 @@ final class Engine {
         )
         onActivity?(workingReport)
         let mouse = Input.mouseLocation
-        Log.write("Richiamo la scena \"\(scene.name)\"")
+        let clock = StepClock()
+        remoteCache = [:]
+        Log.write("Richiamo la scena \"\(scene.name)\"" + (thorough ? " (completo, con le scrivanie)" : " (veloce)"))
 
         // 1. Scala dei monitor
         var displays = DisplayManager.activeDisplays()
@@ -698,20 +738,42 @@ final class Engine {
             }
         }
         if modeChanged {
-            await Input.pause(2)
+            await Input.pause(1.2)
             displays = DisplayManager.activeDisplays()
         }
+        clock.mark("scala")
 
-        // 2. Numero di scrivanie
-        if manageSpaces, SpacesManager.isAvailable {
+        // 2. Numero di scrivanie. Nel richiamo veloce non le tocco: annoto solo quelle da sistemare.
+        //    Nel completo ora aggiungo quelle che mancano; quelle in più le tolgo alla fine, solo se vuote.
+        var spacesToFix: [String] = []
+        if !thorough, manageSpaces, SpacesManager.isAvailable {
+            let layouts = SpacesManager.layouts(for: displays)
+            for saved in scene.displays {
+                guard let count = saved.spaceCount, let live = displays.first(where: { $0.key == saved.key }),
+                      let have = layouts[live.id]?.count, have != count else { continue }
+                spacesToFix.append("\(Engine.label(live.name, builtin: live.isBuiltin)) ha \(have) scrivanie, nella scena sono \(count)")
+            }
+        }
+        var spacesBefore: [CGDirectDisplayID: DesktopLayout] = [:]
+        var spacesWanted: [CGDirectDisplayID: Int] = [:]
+        if thorough, manageSpaces, SpacesManager.isAvailable {
             var wanted: [CGDirectDisplayID: Int] = [:]
             for saved in scene.displays {
                 guard let count = saved.spaceCount, let live = displays.first(where: { $0.key == saved.key }) else { continue }
                 wanted[live.id] = count
             }
+            spacesWanted = wanted
+            spacesBefore = SpacesManager.layouts(for: displays)
             if !wanted.isEmpty {
-                let before = SpacesManager.layouts(for: displays)
-                _ = await SpacesManager.adjustSpaces(wanted: wanted, displays: displays)
+                _ = await SpacesManager.adjustSpaces(wanted: wanted, displays: displays, allowRemove: false)
+            }
+        }
+        clock.mark("scrivanie")
+        // Il resoconto delle scrivanie lo scrivo dopo, quando ho tolto anche quelle in più.
+        func reportSpaces() {
+            guard !spacesWanted.isEmpty else { return }
+            let before = spacesBefore
+            do {
                 let after = SpacesManager.layouts(for: displays)
                 for saved in scene.displays {
                     guard let count = saved.spaceCount,
@@ -740,6 +802,7 @@ final class Engine {
         let runningIDs = Set(running.compactMap(\.bundleIdentifier))
         var launched = 0
         var launchedNames: [String] = []
+        var launchedIDs = Set<String>()
         for app in scene.apps where !runningIDs.contains(app.bundleID) {
             guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: app.bundleID) else {
                 Log.write("App non trovata: \(app.name)")
@@ -752,14 +815,16 @@ final class Engine {
                 _ = try await NSWorkspace.shared.openApplication(at: url, configuration: configuration)
                 launched += 1
                 launchedNames.append(app.name)
+                launchedIDs.insert(app.bundleID)
             } catch {
                 Log.write("Non riesco ad aprire \(app.name): \(error.localizedDescription)")
             }
         }
         if launched > 0 {
+            // Non aspetto: le loro finestre le prendo più avanti, appena compaiono.
             notes.append(.init(text: "Ho aperto " + Engine.shortList(launchedNames)))
-            await Input.pause(4)
         }
+        clock.mark("app")
 
         // 4. Dove sono adesso le finestre (senza cambiare scrivania)
         let usesChrome = scene.windows.contains { $0.bundleID == BrowserBridge.chromeID }
@@ -771,6 +836,7 @@ final class Engine {
         var tracked = inventory(displays: displays, profiles: profiles, knownProfiles: knownProfiles)
         if usesChrome { Engine.attachChromeTabs(&tracked, profiles: profiles) }
         Log.write("Finestre trovate: \(tracked.count). " + Engine.describe(tracked))
+        clock.mark("inventario")
 
         // 5. Abbinamento tra finestre salvate e finestre aperte
         let first = match(scene.windows, with: tracked)
@@ -778,19 +844,64 @@ final class Engine {
         Log.write("Abbinate \(assignments.count) finestre su \(scene.windows.count). Da riaprire: "
                   + first.unmatched.map { "\($0.appName) \"\($0.title)\"" }.joined(separator: ", "))
 
-        // 6. Finestre da riaprire: cartelle, documenti, finestre del browser con le schede
-        let reopened = first.unmatched.filter { reopen($0) }
-        if !reopened.isEmpty {
-            await Input.pause(3)
-            let known = Set(tracked.compactMap(\.windowID))
-            let fresh = inventory(displays: displays, profiles: profiles, excluding: known)
-            var more = match(reopened, with: fresh, strict: false).assignments
-            for index in more.indices { more[index].needsFrame = true }
-            assignments += more
-            if !more.isEmpty {
-                notes.append(.init(text: "Ho riaperto " + Engine.shortList(more.map { self.windowName($0.saved, profiles: profiles) })))
+        // 6a. App appena aperte: aspetto le loro finestre (al massimo 2 secondi) e non riapro niente al posto loro.
+        var unmatched = first.unmatched
+        var known = Set(tracked.compactMap(\.windowID))
+        if !launchedIDs.isEmpty, unmatched.contains(where: { launchedIDs.contains($0.bundleID) }) {
+            for _ in 0..<8 {
+                await Input.pause(0.25)
+                var fresh = inventory(displays: displays, profiles: profiles, excluding: known)
+                guard !fresh.isEmpty else { continue }
+                if usesChrome { Engine.attachChromeTabs(&fresh, profiles: profiles) }
+                let found = match(unmatched, with: fresh, strict: false)
+                var more = found.assignments
+                for index in more.indices { more[index].needsFrame = true }
+                known.formUnion(more.compactMap(\.tracked.windowID))
+                assignments += more
+                unmatched = found.unmatched
+                if !unmatched.contains(where: { launchedIDs.contains($0.bundleID) }) { break }
             }
         }
+
+        // 6b. Finestre da riaprire: cartelle, documenti, finestre del browser con le schede.
+        //     Mai un doppione: se le schede di una finestra di Chrome sono già aperte in un'altra finestra
+        //     dello stesso profilo (anche su un'altra scrivania o nel Dock), non la riapro.
+        let sessions = usesChrome ? ChromeSession.windows(profiles: profiles) : []
+        var reopened: [SavedWindow] = []
+        var alreadyOpen: [String] = []
+        for saved in unmatched {
+            if launchedIDs.contains(saved.bundleID) { continue }
+            if saved.bundleID == BrowserBridge.chromeID, let twin = Engine.chromeTwin(of: saved, in: sessions) {
+                Log.write("Non riapro \"\(saved.title)\": le sue schede sono già aperte in un'altra finestra di Chrome (\(twin.tabs.count) schede, profilo \(twin.profile))")
+                alreadyOpen.append(windowName(saved, profiles: profiles))
+                continue
+            }
+            if reopen(saved) { reopened.append(saved) }
+        }
+        if !alreadyOpen.isEmpty {
+            notes.append(.init(text: "Non ho duplicato " + Engine.shortList(alreadyOpen) + ": le sue schede sono già aperte in un'altra finestra.", tone: .info))
+        }
+        if !reopened.isEmpty {
+            var remaining = reopened
+            var placed: [String] = []
+            for _ in 0..<10 {
+                await Input.pause(0.25)
+                let fresh = inventory(displays: displays, profiles: profiles, excluding: known)
+                guard !fresh.isEmpty else { continue }
+                let found = match(remaining, with: fresh, strict: false)
+                var more = found.assignments
+                for index in more.indices { more[index].needsFrame = true }
+                known.formUnion(more.compactMap(\.tracked.windowID))
+                placed += more.map { self.windowName($0.saved, profiles: profiles) }
+                assignments += more
+                remaining = found.unmatched
+                if remaining.isEmpty { break }
+            }
+            if !placed.isEmpty {
+                notes.append(.init(text: "Ho riaperto " + Engine.shortList(placed)))
+            }
+        }
+        clock.mark("finestre riaperte")
 
         // 7. Finestre ridotte nel Dock: tornano tutte su (anche se al salvataggio erano nel Dock).
         //    Finestre a tutto schermo che nella scena non lo erano: tornano normali.
@@ -815,15 +926,24 @@ final class Engine {
             }
         }
         if stateChanged {
-            await Input.pause(1.2)
+            await Input.pause(0.5)
             refresh(&assignments, displays: displays)
         }
         if !restoredFromDock.isEmpty {
             notes.append(.init(text: "Ho riportato su dal Dock " + Engine.shortList(restoredFromDock)))
         }
 
-        // 8. Monitor e scrivania giusti
-        await relocate(&assignments, scene: scene, displays: displays)
+        clock.mark("dal Dock")
+
+        // 8. Monitor e scrivania giusti. Nel richiamo veloce solo gli spostamenti istantanei.
+        await relocate(&assignments, scene: scene, displays: displays, thorough: thorough)
+        if thorough, !spacesWanted.isEmpty {
+            // Ora che le finestre sono al loro posto tolgo le scrivanie in più, solo se vuote.
+            _ = await SpacesManager.adjustSpaces(wanted: spacesWanted, displays: displays, allowRemove: true)
+            refresh(&assignments, displays: displays)
+        }
+        reportSpaces()
+        clock.mark("monitor e scrivanie")
         let misplaced = assignments.filter { $0.saved.desktop != nil && $0.saved.desktop != $0.tracked.desktop }
         if !misplaced.isEmpty {
             Log.write("Finestre rimaste sulla scrivania sbagliata: " + misplaced.map {
@@ -832,7 +952,8 @@ final class Engine {
         }
 
         // 9. Posizione e dimensione
-        await placeFrames(&assignments, scene: scene, displays: displays)
+        await placeFrames(&assignments, scene: scene, displays: displays, thorough: thorough)
+        clock.mark("posizioni")
 
         // 9b. Schede di Chrome che mancano nelle finestre già aperte: le apro in quella finestra.
         //     Una scheda già aperta in un'altra finestra dello stesso profilo non la riapro:
@@ -861,22 +982,37 @@ final class Engine {
                 }
                 return !BrowserBridge.isMeeting(address) && !present.contains(key) && seen.insert(key).inserted
             }
-            guard !missingTabs.isEmpty,
-                  let live = await liveWindow(for: &assignments[index].tracked, displays: displays) else { continue }
+            guard !missingTabs.isEmpty else { continue }
+            // Nel richiamo veloce solo le finestre in vista: niente cambi di scrivania.
+            let reachable: LiveWindow?
+            if thorough {
+                reachable = await liveWindow(for: &assignments[index].tracked, displays: displays)
+            } else {
+                reachable = isOnVisibleDesktop(assignments[index].tracked, displays: displays) ? assignments[index].tracked.live : nil
+            }
+            guard let live = reachable else { continue }
             WindowManager.raise(live)
-            await Input.pause(0.5)
+            await Input.pause(0.25)
             guard BrowserBridge.focusedChromeWindow(pid: live.pid)?.id == live.windowID else {
                 Log.write("Schede mancanti in \"\(saved.title)\": la finestra non è andata in primo piano")
                 continue
             }
+            // Chrome apre le schede nell'ultima finestra usata di quel profilo: se quella in primo piano
+            // è di un altro profilo, aprirebbe una finestra nuova. In quel caso lascio stare.
+            if profiles.count > 1, profile != "?",
+               let front = BrowserBridge.frontChromeProfile(pid: live.pid, profiles: profiles), front != profile {
+                Log.write("Schede mancanti in \"\(saved.title)\": la finestra in primo piano è del profilo \(front), non \(profile)")
+                continue
+            }
             BrowserBridge.openChromeTabs(profile: saved.chromeProfile ?? assignments[index].tracked.chromeProfile, urls: missingTabs)
-            await Input.pause(1.2)
+            await Input.pause(0.3)
             Log.write("Schede riaperte in \"\(saved.title)\": " + missingTabs.joined(separator: " "))
             tabsReopened.append("\(windowName(saved, profiles: profiles)) (\(missingTabs.count))")
         }
         if !tabsReopened.isEmpty {
             notes.append(.init(text: "Ho riaperto le schede che mancavano in " + Engine.shortList(tabsReopened)))
         }
+        clock.mark("schede")
 
         // 10. Pagina giusta di Impostazioni di Sistema
         for assignment in assignments where assignment.saved.bundleID == Engine.settingsID {
@@ -897,14 +1033,16 @@ final class Engine {
         // 11b. Finestre che non fanno parte della scena, sulle scrivanie dove la scena ha finestre:
         //      le riduco nel Dock, così su ogni scrivania restano su solo quelle della scena.
         if minimizeOthers {
-            let reduced = minimizeOutsiders(assignments, displays: displays)
+            let reduced = minimizeOutsiders(assignments, scene: scene, displays: displays)
             if !reduced.isEmpty {
                 notes.append(.init(text: "Ho ridotto nel Dock le finestre fuori dalla scena: " + Engine.countedList(reduced)))
             }
         }
 
+        clock.mark("fuori scena")
+
         // 12. Zoom di Chrome, sito per sito
-        let chromeZoom = await applyChromeZoom(scene, displays: displays, profiles: profiles)
+        let chromeZoom = await applyChromeZoom(scene, assignments: assignments, displays: displays, profiles: profiles)
         if usesChrome {
             if scene.chromeZoom == nil {
                 notes.append(.init(text: "Questa scena non contiene lo zoom di Chrome, quindi non l'ho toccato.", tone: .info))
@@ -915,6 +1053,9 @@ final class Engine {
             }
             if !chromeZoom.failed.isEmpty {
                 notes.append(.init(text: "Zoom di Chrome non rimesso su " + Engine.shortList(chromeZoom.failed) + ".", warning: true))
+            }
+            if !chromeZoom.notVisible.isEmpty {
+                notes.append(.init(text: "Zoom di Chrome da rimettere su " + Engine.shortList(chromeZoom.notVisible) + ": nessuna scheda di quel sito è in vista. Lo sistemo al prossimo richiamo.", tone: .info))
             }
         }
 
@@ -938,14 +1079,18 @@ final class Engine {
             notes.append(.init(text: "Zoom rimesso in " + Engine.shortList(appZoomDone)))
         }
 
-        // 14. Scrivanie visibili come al salvataggio
-        if manageSpaces {
+        clock.mark("zoom")
+
+        // 14. Scrivanie visibili come al salvataggio (solo nel richiamo completo)
+        if thorough, manageSpaces {
             for saved in scene.displays {
                 guard let desktop = saved.currentDesktop, let live = displays.first(where: { $0.key == saved.key }) else { continue }
                 await SpacesManager.switchDesktop(on: live, to: desktop - 1, displays: displays)
             }
         }
         Input.moveMouse(to: mouse)
+        clock.mark("fine")
+        remoteCache = [:]
 
         activeSceneID = scene.id
         lastFingerprint = DisplayManager.fingerprint(DisplayManager.activeDisplays())
@@ -965,6 +1110,8 @@ final class Engine {
         let closed = missing.filter { !reopenedKeys.contains(Engine.windowKey($0)) }
 
         let wrongDesktop = assignments.filter { $0.saved.desktop != nil && $0.saved.desktop != $0.tracked.desktop }
+        // Nel richiamo veloce le finestre sulla scrivania sbagliata non sono un errore: le sposta il richiamo completo.
+        let toMove = thorough ? [] : wrongDesktop
         let inPlace = assignments.count - wrongDesktop.count
         if missing.isEmpty && wrongDesktop.isEmpty {
             lines.append(.init(text: "Tutte le \(total) finestre della scena sono al loro posto."))
@@ -982,8 +1129,18 @@ final class Engine {
         if !notPlaced.isEmpty {
             notes.append(.init(text: "Ho riaperto " + Engine.countedList(notPlaced.map { self.windowName($0, profiles: profiles) }) + ", ma non sono riuscito a rimetterle al loro posto.", warning: true))
         }
-        for assignment in wrongDesktop.prefix(3) {
-            notes.append(.init(text: "\(windowName(assignment.saved, profiles: profiles)): non sono riuscito a portarla sulla scrivania \(assignment.saved.desktop ?? 0).", warning: true))
+        if thorough {
+            for assignment in wrongDesktop.prefix(3) {
+                notes.append(.init(text: "\(windowName(assignment.saved, profiles: profiles)): non sono riuscito a portarla sulla scrivania \(assignment.saved.desktop ?? 0).", warning: true))
+            }
+        } else {
+            for line in spacesToFix {
+                notes.append(.init(text: line + ".", tone: .info))
+            }
+            if !toMove.isEmpty {
+                let names = Engine.countedList(toMove.map { self.windowName($0.saved, profiles: profiles) })
+                notes.append(.init(text: (toMove.count == 1 ? "Una finestra è" : "\(toMove.count) finestre sono") + " su un'altra scrivania: \(names).", tone: .info))
+            }
         }
         lines += notes.filter { $0.tone == .done } + notes.filter { $0.tone == .warning } + notes.filter { $0.tone == .info }
 
@@ -1002,15 +1159,35 @@ final class Engine {
                 Task { @MainActor in await self.saveScene(name: sceneName, autoApply: sceneAuto) }
             }
         }
-        let title = hasWarnings ? "“\(sceneName)”: qualcosa non è tornato" : "“\(sceneName)” è al suo posto"
-        let actionTitle: String? = stale ? "Aggiorna “\(sceneName)” con il Mac com'è adesso" : nil
+        // Scrivanie da sistemare: lo propongo con un pulsante, perché costa qualche secondo.
+        let desktopWork = !toMove.isEmpty || !spacesToFix.isEmpty
+        var actionTitle: String? = stale ? "Aggiorna “\(sceneName)” con il Mac com'è adesso" : nil
+        var action = updateScene
+        if desktopWork {
+            let estimate = max(2, toMove.count + (spacesToFix.isEmpty ? 0 : 3))
+            actionTitle = "Sistema le scrivanie (circa \(estimate) secondi)"
+            let sceneID = scene.id
+            action = { [weak self] in
+                guard let self, let fresh = self.store.scene(id: sceneID) else { return }
+                Task { @MainActor in await self.apply(fresh, thorough: true) }
+            }
+        }
+        let title: String
+        if hasWarnings {
+            title = "“\(sceneName)”: qualcosa non è tornato"
+        } else if desktopWork {
+            title = "“\(sceneName)”: manca solo l'ordine delle scrivanie"
+        } else {
+            title = "“\(sceneName)” è al suo posto"
+        }
+        Log.write("Richiamo finito in \(StepClock.seconds(clock.total))")
         onActivity?(ActivityReport(
             kind: hasWarnings ? .warning : .success,
             title: title,
-            subtitle: nil,
+            subtitle: "Fatto in \(StepClock.seconds(clock.total))",
             lines: lines,
             actionTitle: actionTitle,
-            action: updateScene
+            action: action
         ))
     }
 
@@ -1063,7 +1240,12 @@ final class Engine {
     /// Riduce nel Dock le finestre aperte che non fanno parte della scena, ma solo sulle scrivanie
     /// (monitor e numero di scrivania) dove la scena ha almeno una finestra. Le riunioni restano su.
     /// Restituisce i nomi delle app delle finestre ridotte.
-    private func minimizeOutsiders(_ assignments: [Assignment], displays: [LiveDisplay]) -> [String] {
+    private func minimizeOutsiders(_ assignments: [Assignment], scene: SavedScene, displays: [LiveDisplay]) -> [String] {
+        // Pagine delle finestre di Chrome della scena: una finestra con le stesse schede è della scena
+        // anche se non sono riuscito ad abbinarla, e non la tocco.
+        let savedChrome = scene.windows.filter { $0.bundleID == BrowserBridge.chromeID }
+            .map { (profile: $0.chromeProfile, pages: Set(($0.tabs ?? []).map(Engine.pageKey))) }
+            .filter { !$0.pages.isEmpty }
         var sceneDesktops = Set<String>()
         var sceneIDs = Set<CGWindowID>()
         for assignment in assignments {
@@ -1074,7 +1256,6 @@ final class Engine {
         let profiles = BrowserBridge.chromeProfiles()
         var current = inventory(displays: displays, profiles: profiles)
         Engine.attachChromeTabs(&current, profiles: profiles)
-        var elements: [pid_t: [CGWindowID: AXUIElement]] = [:]
         var reduced: [String] = []
         for window in current {
             guard let id = window.windowID, !sceneIDs.contains(id),
@@ -1084,10 +1265,22 @@ final class Engine {
                 Log.write("Fuori dalla scena ma lasciata su (riunione): \(window.appName) \"\(window.title)\"")
                 continue
             }
+            if window.bundleID == BrowserBridge.chromeID {
+                // Senza le schede non so se è della scena: nel dubbio la lascio su.
+                guard let tabs = window.tabs, !tabs.isEmpty else { continue }
+                let open = Set(tabs.map(Engine.pageKey))
+                let belongs = savedChrome.contains { saved in
+                    (saved.profile == nil || window.chromeProfile == nil || saved.profile == window.chromeProfile)
+                        && Double(saved.pages.intersection(open).count) / Double(saved.pages.count) >= 0.5
+                }
+                if belongs {
+                    Log.write("Fuori dall'abbinamento ma con le schede della scena, la lascio su: \"\(window.title)\"")
+                    continue
+                }
+            }
             var element = window.live?.element
             if element == nil {
-                if elements[window.pid] == nil { elements[window.pid] = WindowManager.elementsOnAllDesktops(pid: window.pid) }
-                element = elements[window.pid]?[id]
+                element = elementsOnAllDesktops(pid: window.pid)[id]
             }
             guard let element else {
                 Log.write("Fuori dalla scena, non raggiungibile: \(window.appName) \"\(window.title)\"")
@@ -1101,26 +1294,43 @@ final class Engine {
     }
 
     /// Rimette lo zoom di Chrome dei siti della scena, dove è diverso da quello che Chrome ha salvato.
-    /// Lo zoom di Chrome vale per sito e per profilo: per cambiarlo apro un momento una finestra del sito
-    /// nel profilo giusto, sistemo lo zoom con i comandi del menu Vista e la richiudo.
-    /// Le finestre aperte restano come sono e non serve nessun permesso oltre all'Accessibilità.
-    private func applyChromeZoom(_ scene: SavedScene, displays: [LiveDisplay], profiles: [ChromeProfile]) async -> (applied: [String], failed: [String]) {
+    /// Lo zoom di Chrome vale per sito e per profilo e si cambia sulla scheda mostrata: uso una finestra
+    /// della scena già in vista che mostra quel sito. Non apro mai finestre nuove (una seconda copia
+    /// di un'app web come WhatsApp stacca la prima) e non cambio scrivania: il sito che non è in vista
+    /// lo sistemo a un richiamo successivo.
+    private func applyChromeZoom(_ scene: SavedScene, assignments: [Assignment], displays: [LiveDisplay],
+                                 profiles: [ChromeProfile]) async -> (applied: [String], failed: [String], notVisible: [String]) {
         var applied: [String] = []
         var failed: [String] = []
+        var notVisible: [String] = []
         guard let wanted = scene.chromeZoom,
-              let chrome = NSRunningApplication.runningApplications(withBundleIdentifier: BrowserBridge.chromeID).first else { return (applied, failed) }
+              let chrome = NSRunningApplication.runningApplications(withBundleIdentifier: BrowserBridge.chromeID).first else { return (applied, failed, notVisible) }
         for (profile, hosts) in wanted.sorted(by: { $0.key < $1.key }) {
             let current = BrowserBridge.chromeZoomLevels(profile: profile)
             for (host, level) in hosts.sorted(by: { $0.key < $1.key }) {
                 let now = current.hosts[host] ?? current.defaultLevel
                 guard abs(now - level) > 0.01 else { continue }
-                // Una pagina di solo testo dello stesso sito (robots.txt): lo zoom di Chrome vale per tutto il sito,
-                // e così non apro una seconda copia dell'app web. Aprire di nuovo WhatsApp Web, per esempio,
-                // staccherebbe quella già aperta.
-                let address = "https://\(host)/robots.txt"
+                let candidate = assignments.first { assignment in
+                    assignment.saved.bundleID == BrowserBridge.chromeID
+                        && (assignment.tracked.chromeProfile ?? assignment.saved.chromeProfile) == profile
+                        && assignment.tracked.activeTab.flatMap { BrowserBridge.host(of: $0)?.lowercased() } == host.lowercased()
+                        && assignment.tracked.live != nil
+                        && isOnVisibleDesktop(assignment.tracked, displays: displays)
+                }
+                guard let live = candidate?.tracked.live else {
+                    Log.write("Zoom di Chrome su \(host) (profilo \(profile)): nessuna scheda di quel sito in vista, lo lascio")
+                    notVisible.append(host)
+                    continue
+                }
+                WindowManager.raise(live)
+                await Input.pause(0.15)
+                guard BrowserBridge.focusedChromeWindow(pid: chrome.processIdentifier)?.id == live.windowID else {
+                    Log.write("Zoom di Chrome su \(host): la finestra non è andata in primo piano")
+                    failed.append(host)
+                    continue
+                }
                 let steps = BrowserBridge.chromeSteps(from: current.defaultLevel, to: level)
-                let done = await zoomInTemporaryWindow(address: address, profile: profile, steps: steps,
-                                                       pid: chrome.processIdentifier, profiles: profiles)
+                let done = await ZoomManager.setZoom(pid: chrome.processIdentifier, steps: steps, appName: "Chrome")
                 Log.write("Zoom di Chrome su \(host) (profilo \(profile)): da \(Engine.percent(now))% a \(Engine.percent(level))% \(done ? "applicato" : "NON applicato")")
                 if done {
                     applied.append("\(host) al \(Engine.percent(level))%")
@@ -1129,43 +1339,22 @@ final class Engine {
                 }
             }
         }
-        return (applied, failed)
+        return (applied, failed, notVisible)
     }
 
-    /// Apre una finestra di Chrome sul sito nel profilo indicato, ne sistema lo zoom e la chiude.
-    private func zoomInTemporaryWindow(address: String, profile: String, steps: Int,
-                                       pid: pid_t, profiles: [ChromeProfile]) async -> Bool {
-        let before = BrowserBridge.focusedChromeWindow(pid: pid)?.id
-        BrowserBridge.openChromeWindow(profile: profile, urls: [address])
-        var opened: CGWindowID?
-        for _ in 0..<24 {
-            await Input.pause(0.25)
-            if let front = BrowserBridge.focusedChromeWindow(pid: pid), let id = front.id, id != before {
-                opened = id
-                break
-            }
+    /// Una finestra di Chrome già aperta (su qualsiasi scrivania o nel Dock) con le stesse schede di quella salvata:
+    /// almeno metà delle sue pagine, nello stesso profilo. Se c'è, riaprire la finestra farebbe un doppione.
+    static func chromeTwin(of saved: SavedWindow, in sessions: [ChromeSessionWindow]) -> ChromeSessionWindow? {
+        let pages = Set((saved.tabs ?? []).filter { !BrowserBridge.isMeeting($0) }.map(pageKey))
+        guard !pages.isEmpty else { return nil }
+        var best: (window: ChromeSessionWindow, share: Double)?
+        for window in sessions {
+            if let profile = saved.chromeProfile, window.profile != profile { continue }
+            let open = Set(window.tabs.map(pageKey))
+            let share = Double(pages.intersection(open).count) / Double(pages.count)
+            if share >= 0.5, share > (best?.share ?? 0) { best = (window, share) }
         }
-        guard let opened else {
-            Log.write("Zoom di Chrome: la finestra per \(address) non si è aperta")
-            return false
-        }
-        // Lascio caricare la pagina: Chrome applica lo zoom al sito della pagina mostrata.
-        await Input.pause(2)
-        var done = false
-        let front = BrowserBridge.focusedChromeWindow(pid: pid)
-        let frontProfile = BrowserBridge.profile(fromTitle: front?.title ?? "", profiles: profiles)
-        if profiles.count > 1, let frontProfile, frontProfile != profile {
-            Log.write("Zoom di Chrome: la finestra aperta è del profilo \(frontProfile) invece di \(profile)")
-        } else if front?.id == opened {
-            done = await ZoomManager.setZoom(pid: pid, steps: steps, appName: "Chrome")
-            await Input.pause(0.3)
-        } else {
-            Log.write("Zoom di Chrome: la finestra aperta non è più in primo piano")
-        }
-        if !BrowserBridge.closeWindow(id: opened, pid: pid) {
-            Log.write("Zoom di Chrome: non riesco a chiudere la finestra aperta per lo zoom")
-        }
-        return done
+        return best?.window
     }
 
     func setAppZoom(id: UUID, _ values: [String: Int]) {
@@ -1286,6 +1475,7 @@ final class Engine {
         for (position, index) in chromeIndices.enumerated() {
             guard let session = found[position] else { continue }
             tracked[index].tabs = session.tabs
+            tracked[index].activeTab = session.tabs.indices.contains(session.selectedIndex) ? session.tabs[session.selectedIndex] : session.tabs.first
             if tracked[index].chromeProfile == nil { tracked[index].chromeProfile = session.profile }
         }
     }
@@ -1348,9 +1538,10 @@ final class Engine {
     /// - finestra sulla scrivania sbagliata dello stesso monitor: la appoggio un attimo sull'altro monitor,
     ///   porto il suo monitor sulla scrivania giusta e ce la rimetto.
     /// Con un monitor solo resta il trascinamento con ctrl + freccia.
-    private func relocate(_ assignments: inout [Assignment], scene: SavedScene, displays: [LiveDisplay]) async {
+    private func relocate(_ assignments: inout [Assignment], scene: SavedScene, displays: [LiveDisplay], thorough: Bool) async {
         let fallback = displays.first(where: \.isBuiltin) ?? displays.first
         let useDesktops = manageSpaces && SpacesManager.isAvailable
+        let visibleDesktops = SpacesManager.layouts(for: displays).mapValues { $0.currentIndex.map { $0 + 1 } }
         let order = assignments.indices.sorted { lhs, rhs in
             let left = assignments[lhs].saved
             let right = assignments[rhs].saved
@@ -1366,6 +1557,23 @@ final class Engine {
             if assignments[index].tracked.isFullScreen { continue }
             if let wanted, let count = SpacesManager.layouts(for: displays)[target.id]?.count, wanted > count {
                 Log.write("\(assignments[index].saved.appName): la scrivania \(wanted) di \(target.name) non c'è (sono \(count))")
+                continue
+            }
+
+            // Richiamo veloce: solo il passaggio a un altro monitor quando la scrivania giusta è già quella in vista.
+            // Tutto il resto vuol dire cambiare scrivania, e lo fa il richiamo completo.
+            if !thorough {
+                let visible = visibleDesktops[target.id] ?? nil
+                guard !sameDisplay, wanted == nil || wanted == visible,
+                      let live = assignments[index].tracked.live,
+                      isOnVisibleDesktop(assignments[index].tracked, displays: displays) else { continue }
+                let frame = targetFrame(for: assignments[index].saved, on: target, scene: scene)
+                WindowManager.setFrame(live.element, to: frame)
+                assignments[index].tracked.frame = frame
+                assignments[index].tracked.displayKey = target.key
+                assignments[index].tracked.desktop = wanted ?? visible
+                assignments[index].needsFrame = true
+                Log.write("\(assignments[index].saved.appName) \"\(assignments[index].saved.title)\": portata su \(target.name)")
                 continue
             }
 
@@ -1437,7 +1645,7 @@ final class Engine {
     }
 
     /// Imposta posizione e dimensione solo dove serve, cambiando scrivania solo se indispensabile.
-    private func placeFrames(_ assignments: inout [Assignment], scene: SavedScene, displays: [LiveDisplay]) async {
+    private func placeFrames(_ assignments: inout [Assignment], scene: SavedScene, displays: [LiveDisplay], thorough: Bool) async {
         let fallback = displays.first(where: \.isBuiltin) ?? displays.first
         var targets: [Int: CGRect] = [:]
         for index in assignments.indices {
@@ -1462,6 +1670,8 @@ final class Engine {
         }
         await Input.pause(0.3)
 
+        // Nel richiamo veloce non cambio scrivania: quelle che non si sono sistemate restano come sono.
+        guard thorough, !pending.isEmpty else { return }
         // Verifico con il server delle finestre; dove non ha funzionato passo dalla scrivania.
         let actual = Dictionary(WindowManager.systemWindows().map { ($0.id, $0.bounds) }, uniquingKeysWith: { first, _ in first })
         let stillWrong = pending.filter { index in
