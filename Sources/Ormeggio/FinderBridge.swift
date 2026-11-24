@@ -43,6 +43,40 @@ enum FinderBridge {
         }
     }
 
+    /// Cartella di una finestra del Finder ricavata dal suo titolo, senza AppleScript: la cerca
+    /// tra le cartelle di casa e tra le cartelle recenti del Finder. Non entra nelle cartelle,
+    /// così macOS non chiede altri permessi.
+    static func folder(forTitle title: String) -> String? {
+        guard !title.isEmpty else { return nil }
+        let manager = FileManager.default
+        let home = manager.homeDirectoryForCurrentUser
+        // Cartelle standard: il Finder le mostra con il nome tradotto ("Scrivania", "Documenti").
+        var standard: [String] = [home.path, "/Applications"]
+        for name in ["Desktop", "Documents", "Downloads", "Pictures", "Movies", "Music", "Public",
+                     "Library/Mobile Documents/com~apple~CloudDocs"] {
+            standard.append(home.appendingPathComponent(name).path)
+        }
+        for path in standard where manager.displayName(atPath: path) == title || (path as NSString).lastPathComponent == title {
+            return path
+        }
+        // Cartelle recenti e cartelle di casa: confronto solo il nome, senza aprirle.
+        var others = recentFolders()
+        if let children = try? manager.contentsOfDirectory(atPath: home.path) {
+            others += children.filter { !$0.hasPrefix(".") }.map { home.appendingPathComponent($0).path }
+        }
+        return others.first { ($0 as NSString).lastPathComponent == title }
+    }
+
+    /// Cartelle aperte di recente nel Finder (menu Vai > Cartelle recenti). Il percorso lo leggo
+    /// dal segnalibro salvato dal Finder, senza toccare la cartella.
+    static func recentFolders() -> [String] {
+        guard let entries = CFPreferencesCopyAppValue("FXRecentFolders" as CFString, "com.apple.finder" as CFString) as? [[String: Any]] else { return [] }
+        return entries.compactMap { entry -> String? in
+            guard let data = entry["file-bookmark"] as? Data else { return nil }
+            return URL.resourceValues(forKeys: [.pathKey], fromBookmarkData: data)?.path
+        }
+    }
+
     /// Titolo che il Finder mostra per una cartella (per esempio "Scrivania").
     static func displayName(of path: String) -> String {
         FileManager.default.displayName(atPath: path)
@@ -50,11 +84,10 @@ enum FinderBridge {
 
     /// Apre la cartella in una finestra del Finder.
     static func open(folder path: String) {
-        var isDirectory: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory), isDirectory.boolValue else {
-            Log.write("Cartella non trovata: \(path)")
-            return
+        // Non controllo la cartella prima: per quelle in Scrivania o Documenti macOS chiederebbe un permesso.
+        // La apre il Finder, che può.
+        if !NSWorkspace.shared.open(URL(fileURLWithPath: path, isDirectory: true)) {
+            Log.write("Cartella non aperta: \(path)")
         }
-        _ = NSWorkspace.shared.open(URL(fileURLWithPath: path, isDirectory: true))
     }
 }

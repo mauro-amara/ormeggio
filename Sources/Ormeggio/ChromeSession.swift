@@ -141,7 +141,8 @@ enum ChromeSession {
         }
 
         var result: [ChromeSessionWindow] = []
-        for (windowID, window) in windows where window.type == 0 {
+        // Tutti i tipi di finestra: anche le app installate da Chrome (per esempio WhatsApp Web).
+        for (windowID, window) in windows {
             let windowTabs = tabs.values
                 .filter { $0.window == windowID }
                 .sorted { $0.index < $1.index }
@@ -181,6 +182,52 @@ enum ChromeSession {
     }
 
     // MARK: Abbinamento con le finestre aperte
+
+    /// Abbina le finestre di Chrome aperte (titolo, posizione, profilo se noto) a quelle della sessione.
+    /// Prima per titolo e posizione; poi per esclusione: se di un profilo resta una sola finestra aperta
+    /// e una sola finestra nella sessione, sono la stessa. Restituisce, per posizione nell'elenco, la sessione trovata.
+    static func assign(_ windows: [(title: String, frame: CGRect, profile: String?)], sessions: [ChromeSessionWindow]) -> [Int: ChromeSessionWindow] {
+        var remaining = sessions
+        var result: [Int: ChromeSessionWindow] = [:]
+        for (index, window) in windows.enumerated() {
+            if let found = match(title: window.title, frame: window.frame, profile: window.profile, in: remaining) {
+                result[index] = remaining.remove(at: found)
+            }
+        }
+        var changed = true
+        while changed {
+            changed = false
+            let leftover = windows.indices.filter { result[$0] == nil }
+            for index in leftover where result[index] == nil {
+                let profile = windows[index].profile
+                let open = leftover.filter { result[$0] == nil && windows[$0].profile == profile }
+                let candidates = remaining.indices.filter { profile == nil || remaining[$0].profile == profile }
+                if open.count == 1, candidates.count == 1 {
+                    result[index] = remaining.remove(at: candidates[0])
+                    changed = true
+                }
+            }
+        }
+        let unmatched = windows.indices.filter { result[$0] == nil }
+        if !unmatched.isEmpty {
+            var open: [String] = []
+            for index in unmatched {
+                let window = windows[index]
+                open.append("\"" + window.title + "\" " + (window.profile ?? "?") + " " + describe(window.frame))
+            }
+            var left: [String] = []
+            for session in remaining {
+                left.append("\"" + session.activeTitle + "\" " + session.profile + " " + describe(session.bounds))
+            }
+            Log.write("Finestre di Chrome senza schede: " + open.joined(separator: "; ") + ". Sessioni rimaste: " + left.joined(separator: "; "))
+        }
+        return result
+    }
+
+    private static func describe(_ rect: CGRect?) -> String {
+        guard let rect else { return "?" }
+        return "\(Int(rect.minX)),\(Int(rect.minY)) \(Int(rect.width))x\(Int(rect.height))"
+    }
 
     /// Abbina una finestra di Chrome (titolo e posizione) a una finestra della sessione.
     /// Il titolo della finestra è il titolo della scheda in primo piano più il nome del profilo.

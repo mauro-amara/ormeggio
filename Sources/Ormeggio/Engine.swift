@@ -238,7 +238,7 @@ final class Engine {
         var safariInfos = scriptable(BrowserBridge.safariID) ? BrowserBridge.windows(bundleID: BrowserBridge.safariID) : []
         let profiles = runningIDs.contains(BrowserBridge.chromeID) ? BrowserBridge.chromeProfiles() : []
         // Schede, profilo e posizione di ogni finestra di Chrome, dai file di sessione: nessun permesso.
-        var chromeSessions = runningIDs.contains(BrowserBridge.chromeID) ? ChromeSession.windows(profiles: profiles) : []
+        let chromeSessions = runningIDs.contains(BrowserBridge.chromeID) ? ChromeSession.windows(profiles: profiles) : []
         Log.write("Sessioni di Chrome lette: \(chromeSessions.count) finestre, \(chromeSessions.reduce(0) { $0 + $1.tabs.count }) schede")
 
         // Profili di Chrome già noti dalle scene salvate, per le finestre ancora aperte.
@@ -263,10 +263,21 @@ final class Engine {
             )
         }
 
+        // Ogni finestra di Chrome aperta con la sua finestra della sessione.
+        let chromeIndices = tracked.indices.filter { tracked[$0].bundleID == BrowserBridge.chromeID }
+        let chromeFound = ChromeSession.assign(
+            chromeIndices.map { (title: tracked[$0].title, frame: tracked[$0].frame, profile: tracked[$0].chromeProfile) },
+            sessions: chromeSessions
+        )
+        var sessionFor: [Int: ChromeSessionWindow] = [:]
+        for (position, trackedIndex) in chromeIndices.enumerated() {
+            if let session = chromeFound[position] { sessionFor[trackedIndex] = session }
+        }
+
         var unusedFolders = finderFolders
         var counters: [String: Int] = [:]
         var windows: [SavedWindow] = []
-        for item in tracked {
+        for (trackedIndex, item) in tracked.enumerated() {
             guard let display = displays.first(where: { $0.key == item.displayKey }) else { continue }
             let relative = CGRect(
                 x: item.frame.minX - display.bounds.minX,
@@ -300,10 +311,11 @@ final class Engine {
                     let folder = unusedFolders.remove(at: match)
                     saved.folderPath = folder.path
                     if saved.title.isEmpty { saved.title = FinderBridge.displayName(of: folder.path) }
+                } else if let path = FinderBridge.folder(forTitle: item.title) {
+                    saved.folderPath = path
                 }
             case BrowserBridge.chromeID:
-                if let match = ChromeSession.match(title: item.title, frame: item.frame, profile: item.chromeProfile, in: chromeSessions) {
-                    let session = chromeSessions.remove(at: match)
+                if let session = sessionFor[trackedIndex] {
                     saved.tabs = session.tabs
                     if saved.chromeProfile == nil { saved.chromeProfile = session.profile }
                     if saved.title.isEmpty { saved.title = session.activeTitle }
@@ -488,7 +500,8 @@ final class Engine {
             if withoutTabs.count == chromeWindows.count {
                 lines.append(.init(text: "Non sono riuscito a leggere le schede di Chrome, quindi non ho salvato né le schede né lo zoom. Mandami la diagnostica: ci guardo io.", warning: true))
             } else if !withoutTabs.isEmpty {
-                lines.append(.init(text: "Di \(withoutTabs.count) \(withoutTabs.count == 1 ? "finestra" : "finestre") di Chrome non ho letto le schede: se le chiudi non potrò riaprirle.", warning: true))
+                let names = withoutTabs.map { "“" + BrowserBridge.readableTitle($0.title, profiles: BrowserBridge.chromeProfiles()) + "”" }
+                lines.append(.init(text: "Di \(Engine.shortList(names)) non ho letto le schede: la rimetto a posto, ma se la chiudi non potrò riaprirla.", tone: .info))
             }
             if BrowserBridge.chromeProfiles().count > 1 {
                 let unknown = chromeWindows.filter { $0.chromeProfile == nil }.count
@@ -498,8 +511,10 @@ final class Engine {
             }
         }
         let finderWindows = scene.windows.filter { $0.bundleID == FinderBridge.bundleID }
-        if !finderWindows.isEmpty, finderWindows.allSatisfy({ $0.folderPath == nil }) {
-            lines.append(.init(text: "Non sono riuscito a leggere le cartelle aperte nel Finder: se chiudi quelle finestre non potrò riaprirle.", tone: .info))
+        let unknownFolders = finderWindows.filter { $0.folderPath == nil }
+        if !unknownFolders.isEmpty {
+            let names = unknownFolders.map { $0.title.isEmpty ? "una finestra senza titolo" : "“\($0.title)”" }
+            lines.append(.init(text: "Del Finder non so quale cartella mostra " + Engine.shortList(names) + ": la rimetto a posto, ma se la chiudi non potrò riaprirla.", tone: .info))
         }
         if windows == 0 {
             lines.append(.init(text: "Non ho trovato finestre: controlla il permesso di Accessibilità dal menu dell'ancora.", warning: true))
@@ -1128,12 +1143,14 @@ final class Engine {
 
     /// Aggiunge alle finestre di Chrome aperte le loro schede e il loro profilo, dai file di sessione.
     static func attachChromeTabs(_ tracked: inout [TrackedWindow], profiles: [ChromeProfile]) {
-        guard tracked.contains(where: { $0.bundleID == BrowserBridge.chromeID }) else { return }
-        var sessions = ChromeSession.windows(profiles: profiles)
-        for index in tracked.indices where tracked[index].bundleID == BrowserBridge.chromeID {
-            let window = tracked[index]
-            guard let found = ChromeSession.match(title: window.title, frame: window.frame, profile: window.chromeProfile, in: sessions) else { continue }
-            let session = sessions.remove(at: found)
+        let chromeIndices = tracked.indices.filter { tracked[$0].bundleID == BrowserBridge.chromeID }
+        guard !chromeIndices.isEmpty else { return }
+        let found = ChromeSession.assign(
+            chromeIndices.map { (title: tracked[$0].title, frame: tracked[$0].frame, profile: tracked[$0].chromeProfile) },
+            sessions: ChromeSession.windows(profiles: profiles)
+        )
+        for (position, index) in chromeIndices.enumerated() {
+            guard let session = found[position] else { continue }
             tracked[index].tabs = session.tabs
             if tracked[index].chromeProfile == nil { tracked[index].chromeProfile = session.profile }
         }
