@@ -154,6 +154,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updateIcon()
     }
 
+    @objc private func copyDiagnostics() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(engine.supportReport(), forType: .string)
+        HUD.shared.show(ActivityReport(
+            kind: .success,
+            title: "Diagnostica copiata",
+            subtitle: "Incollala nella chat con Claude (cmd V)"
+        ))
+    }
+
     @objc private func installUpdate() {
         guard let info = updater.available else { return }
         installAutomatically(info)
@@ -321,6 +332,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         loginItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
         settingsMenu.addItem(loginItem)
         settingsMenu.addItem(.separator())
+        settingsMenu.addItem(commandItem("Copia la diagnostica per Claude", #selector(copyDiagnostics), icon: "doc.on.doc"))
         settingsMenu.addItem(commandItem("Diagnostica…", #selector(showDiagnostics), icon: "stethoscope"))
         settingsMenu.addItem(commandItem("Salva diagnostica per l'assistenza…", #selector(exportReport), icon: "doc.text"))
         settingsMenu.addItem(commandItem("Apri la cartella dei dati", #selector(openDataFolder), icon: "folder"))

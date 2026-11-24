@@ -783,15 +783,21 @@ final class Engine {
             }
         }
 
-        // 7. Finestre ridotte nel Dock o a tutto schermo che nella scena non lo erano
+        // 7. Finestre ridotte nel Dock: tornano tutte su (anche se al salvataggio erano nel Dock).
+        //    Finestre a tutto schermo che nella scena non lo erano: tornano normali.
         var stateChanged = false
+        var restoredFromDock: [String] = []
         for index in assignments.indices {
+            if assignments[index].tracked.live == nil, let id = assignments[index].tracked.windowID {
+                assignments[index].tracked.live = WindowManager.resolve(windowID: id, pid: assignments[index].tracked.pid)
+            }
             let assignment = assignments[index]
             guard let live = assignment.tracked.live else { continue }
-            if assignment.tracked.isMinimized, assignment.saved.minimized != true {
+            if assignment.tracked.isMinimized || live.isMinimized {
                 WindowManager.setMinimized(live.element, false)
                 assignments[index].needsFrame = true
                 stateChanged = true
+                restoredFromDock.append(windowName(assignment.saved, profiles: profiles))
             }
             if assignment.tracked.isFullScreen, assignment.saved.fullScreen != true {
                 WindowManager.setFullScreen(live.element, false)
@@ -802,6 +808,9 @@ final class Engine {
         if stateChanged {
             await Input.pause(1.2)
             refresh(&assignments, displays: displays)
+        }
+        if !restoredFromDock.isEmpty {
+            notes.append(.init(text: "Ho riportato su dal Dock " + Engine.shortList(restoredFromDock)))
         }
 
         // 8. Monitor e scrivania giusti
@@ -852,12 +861,9 @@ final class Engine {
             }
         }
 
-        // 11. Finestre che nella scena erano ridotte nel Dock o a tutto schermo
+        // 11. Finestre che nella scena erano a tutto schermo (quelle nel Dock restano su)
         for assignment in assignments {
             guard let live = assignment.tracked.live else { continue }
-            if assignment.saved.minimized == true, !assignment.tracked.isMinimized {
-                WindowManager.setMinimized(live.element, true)
-            }
             if assignment.saved.fullScreen == true, !assignment.tracked.isFullScreen {
                 WindowManager.setFullScreen(live.element, true)
             }
