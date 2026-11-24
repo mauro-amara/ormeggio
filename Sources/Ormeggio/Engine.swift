@@ -311,6 +311,19 @@ final class Engine {
             return SavedApp(bundleID: bundleID, name: app.localizedName ?? bundleID)
         }
 
+        // Zoom di Chrome dei siti aperti, per profilo.
+        var chromeZoom: [String: [String: Double]] = [:]
+        var levelsByProfile: [String: (defaultLevel: Double, hosts: [String: Double])] = [:]
+        for window in windows where window.bundleID == BrowserBridge.chromeID {
+            let profile = window.chromeProfile ?? profiles.first?.directory ?? "Default"
+            if levelsByProfile[profile] == nil { levelsByProfile[profile] = BrowserBridge.chromeZoomLevels(profile: profile) }
+            guard let levels = levelsByProfile[profile] else { continue }
+            for address in window.tabs ?? [] {
+                guard let host = BrowserBridge.host(of: address) else { continue }
+                chromeZoom[profile, default: [:]][host] = levels.hosts[host] ?? levels.defaultLevel
+            }
+        }
+
         return SavedScene(
             id: UUID(),
             name: name,
@@ -319,7 +332,8 @@ final class Engine {
             displays: savedDisplays,
             apps: apps,
             windows: windows,
-            savedAt: Date()
+            savedAt: Date(),
+            chromeZoom: chromeZoom.isEmpty ? nil : chromeZoom
         )
     }
 
@@ -568,7 +582,21 @@ final class Engine {
             }
         }
 
-        // 12. Scrivanie visibili come al salvataggio
+        // 12. Zoom di Chrome, sito per sito
+        await applyChromeZoom(scene, assignments: assignments, displays: displays)
+
+        // 13. Zoom delle altre app, come scelto nella scena
+        for (bundleID, steps) in scene.appZoom ?? [:] {
+            guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first else { continue }
+            if let live = assignments.first(where: { $0.saved.bundleID == bundleID })?.tracked.live {
+                WindowManager.raise(live)
+                await Input.pause(0.2)
+            }
+            let done = await ZoomManager.setZoom(pid: app.processIdentifier, steps: steps, appName: app.localizedName ?? bundleID)
+            Log.write("Zoom di \(app.localizedName ?? bundleID): \(steps >= 0 ? "+" : "")\(steps) \(done ? "applicato" : "NON applicato")")
+        }
+
+        // 14. Scrivanie visibili come al salvataggio
         if manageSpaces {
             for saved in scene.displays {
                 guard let desktop = saved.currentDesktop, let live = displays.first(where: { $0.key == saved.key }) else { continue }
@@ -582,6 +610,39 @@ final class Engine {
         isBusy = false
         refreshState()
         Log.write("Scena \"\(scene.name)\" richiamata: \(assignments.count) finestre sistemate, \(launched) app aperte, \(reopened.count) finestre riaperte")
+    }
+
+    /// Rimette lo zoom di Chrome dei siti della scena, dove è diverso da quello attuale.
+    private func applyChromeZoom(_ scene: SavedScene, assignments: [Assignment], displays: [LiveDisplay]) async {
+        guard let wanted = scene.chromeZoom,
+              let chrome = NSRunningApplication.runningApplications(withBundleIdentifier: BrowserBridge.chromeID).first else { return }
+        for (profile, hosts) in wanted {
+            let current = BrowserBridge.chromeZoomLevels(profile: profile)
+            for (host, level) in hosts.sorted(by: { $0.key < $1.key }) {
+                let now = current.hosts[host] ?? current.defaultLevel
+                guard abs(now - level) > 0.01 else { continue }
+                // Finestra della scena con quel sito, per scegliere la scheda giusta.
+                let window = assignments.first { assignment in
+                    assignment.saved.bundleID == BrowserBridge.chromeID
+                        && (assignment.saved.chromeProfile ?? profile) == profile
+                        && (assignment.saved.tabs ?? []).contains { BrowserBridge.host(of: $0) == host }
+                }
+                let frame = window.flatMap { assignment in
+                    displays.first(where: { $0.key == assignment.saved.displayKey }).map {
+                        self.targetFrame(for: assignment.saved, on: $0, scene: scene)
+                    }
+                }
+                guard BrowserBridge.focusChromeTab(host: host, near: frame) else { continue }
+                await Input.pause(0.4)
+                let steps = BrowserBridge.chromeSteps(from: current.defaultLevel, to: level)
+                let done = await ZoomManager.setZoom(pid: chrome.processIdentifier, steps: steps, appName: "Chrome \(host)")
+                Log.write("Zoom di Chrome su \(host): da \(Int(pow(1.2, now) * 100))% a \(Int(pow(1.2, level) * 100))% \(done ? "applicato" : "NON applicato")")
+            }
+        }
+    }
+
+    func setAppZoom(id: UUID, _ values: [String: Int]) {
+        store.update(id: id) { $0.appZoom = values.isEmpty ? nil : values }
     }
 
     /// Aggiorna posizione, monitor e scrivania delle finestre già abbinate.

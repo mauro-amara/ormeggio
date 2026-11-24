@@ -2,6 +2,7 @@ import AppKit
 
 /// Una finestra del browser letta con AppleScript: titolo, posizione e schede.
 struct BrowserWindowInfo {
+    let index: Int
     let title: String
     let frame: CGRect
     let urls: [String]
@@ -41,7 +42,7 @@ enum BrowserBridge {
                     repeat with t in every tab of w
                         set addresses to addresses & (URL of t) & sep
                     end repeat
-                    set output to output & (name of w) & tab & (item 1 of b) & tab & (item 2 of b) & tab & (item 3 of b) & tab & (item 4 of b) & tab & addresses & linefeed
+                    set output to output & (index of w) & tab & (name of w) & tab & (item 1 of b) & tab & (item 2 of b) & tab & (item 3 of b) & tab & (item 4 of b) & tab & addresses & linefeed
                 end try
             end repeat
             return output
@@ -50,12 +51,13 @@ enum BrowserBridge {
         guard let text = run(source) else { return [] }
         return text.split(separator: "\n").compactMap { line -> BrowserWindowInfo? in
             let parts = line.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
-            guard parts.count >= 6,
-                  let left = Double(parts[1]), let top = Double(parts[2]),
-                  let right = Double(parts[3]), let bottom = Double(parts[4]) else { return nil }
-            let urls = parts[5].split(separator: "\u{1E}").map(String.init).filter { !$0.isEmpty && $0 != "missing value" }
+            guard parts.count >= 7, let index = Int(parts[0]),
+                  let left = Double(parts[2]), let top = Double(parts[3]),
+                  let right = Double(parts[4]), let bottom = Double(parts[5]) else { return nil }
+            let urls = parts[6].split(separator: "\u{1E}").map(String.init).filter { !$0.isEmpty && $0 != "missing value" }
             return BrowserWindowInfo(
-                title: parts[0],
+                index: index,
+                title: parts[1],
                 frame: CGRect(x: left, y: top, width: right - left, height: bottom - top),
                 urls: urls
             )
@@ -116,6 +118,83 @@ enum BrowserBridge {
             queue.append(contentsOf: WindowManager.children(of: element))
         }
         return best?.directory
+    }
+
+    // MARK: Zoom di Chrome
+
+    /// Livelli di zoom dei siti salvati nelle preferenze del profilo Chrome.
+    /// Il livello è quello di Chrome: 0 = 100%, ogni unità vale un fattore 1,2.
+    static func chromeZoomLevels(profile: String) -> (defaultLevel: Double, hosts: [String: Double]) {
+        let url = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/Google/Chrome")
+            .appendingPathComponent(profile)
+            .appendingPathComponent("Preferences")
+        guard let data = try? Data(contentsOf: url),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let partition = json["partition"] as? [String: Any] else { return (0, [:]) }
+        var defaultLevel = 0.0
+        if let defaults = partition["default_zoom_level"] as? [String: Any] {
+            defaultLevel = defaults.values.compactMap { ($0 as? NSNumber)?.doubleValue }.first ?? 0
+        } else if let value = partition["default_zoom_level"] as? NSNumber {
+            defaultLevel = value.doubleValue
+        }
+        var hosts: [String: Double] = [:]
+        if let partitions = partition["per_host_zoom_levels"] as? [String: Any] {
+            for case let entries as [String: Any] in partitions.values {
+                for (host, value) in entries {
+                    if let number = value as? NSNumber {
+                        hosts[host] = number.doubleValue
+                    } else if let entry = value as? [String: Any], let number = entry["zoom_level"] as? NSNumber {
+                        hosts[host] = number.doubleValue
+                    }
+                }
+            }
+        }
+        return (defaultLevel, hosts)
+    }
+
+    static func host(of address: String) -> String? {
+        guard let url = URL(string: address), let host = url.host, !host.isEmpty else { return nil }
+        return host
+    }
+
+    /// Scatti di zoom (cmd + e cmd -) tra il livello predefinito e quello voluto.
+    static func chromeSteps(from defaultLevel: Double, to level: Double) -> Int {
+        let presets: [Double] = [0.25, 1.0 / 3.0, 0.5, 2.0 / 3.0, 0.75, 0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 4.0, 5.0]
+        func index(_ value: Double) -> Int {
+            let factor = pow(1.2, value)
+            return presets.indices.min(by: { abs(presets[$0] - factor) < abs(presets[$1] - factor) }) ?? 7
+        }
+        return index(level) - index(defaultLevel)
+    }
+
+    /// Mette in primo piano una scheda di Chrome aperta sul sito indicato, nella finestra più vicina alla posizione data.
+    static func focusChromeTab(host: String, near frame: CGRect?) -> Bool {
+        let infos = windows(bundleID: chromeID).filter { info in
+            info.urls.contains { self.host(of: $0) == host }
+        }
+        guard !infos.isEmpty else { return false }
+        let chosen: BrowserWindowInfo
+        if let frame {
+            chosen = infos.min(by: { distance($0.frame, frame) < distance($1.frame, frame) }) ?? infos[0]
+        } else {
+            chosen = infos[0]
+        }
+        guard let tabIndex = chosen.urls.firstIndex(where: { self.host(of: $0) == host }) else { return false }
+        let source = """
+        tell application "Google Chrome"
+            set w to window \(chosen.index)
+            set active tab index of w to \(tabIndex + 1)
+            set index of w to 1
+            activate
+        end tell
+        """
+        _ = run(source)
+        return true
+    }
+
+    private static func distance(_ lhs: CGRect, _ rhs: CGRect) -> CGFloat {
+        abs(lhs.minX - rhs.minX) + abs(lhs.minY - rhs.minY) + abs(lhs.width - rhs.width) + abs(lhs.height - rhs.height)
     }
 
     // MARK: Apertura di finestre

@@ -88,4 +88,8 @@ struct SavedScene: Codable, Identifiable {
     var apps: [SavedApp]
     var windows: [SavedWindow]
     var savedAt: Date
+    /// Zoom di Chrome per profilo e sito, letto dalle preferenze di Chrome (livelli di Chrome).
+    var chromeZoom: [String: [String: Double]]?
+    /// Zoom delle altre app scelto dall'utente: scatti rispetto al 100% (0 = normale).
+    var appZoom: [String: Int]?
 }

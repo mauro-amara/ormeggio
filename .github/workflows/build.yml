@@ -33,21 +33,29 @@ jobs:
           path: dist/*.dmg
           retention-days: 30
 
-      # Pubblica DMG ed esito nel ramo "builds", anche se la compilazione fallisce,
-      # così il registro degli errori è leggibile senza aprire GitHub.
-      - name: Pubblica nel ramo builds
+      # Versione riuscita: DMG e latest.json nel ramo "builds", da cui l'app scarica gli aggiornamenti.
+      # Versione fallita: solo il registro, nel ramo "builds-failed", senza toccare l'ultima versione buona.
+      - name: Pubblica
         if: always()
         shell: bash
         run: |
+          VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" Resources/Info.plist)
+          BUILD=$(/usr/libexec/PlistBuddy -c "Print CFBundleVersion" Resources/Info.plist)
+          NOTES=$(git log -1 --pretty=%s | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read().strip()))')
           mkdir -p out
           cp build.log out/build.log 2>/dev/null || echo "Nessun registro" > out/build.log
-          cp dist/*.dmg out/ 2>/dev/null || true
           echo "${{ job.status }}" > out/esito.txt
           echo "${GITHUB_SHA}" > out/commit.txt
+          BRANCH=builds-failed
+          if [ "${{ job.status }}" = "success" ] && ls dist/*.dmg >/dev/null 2>&1; then
+            BRANCH=builds
+            cp dist/*.dmg out/
+            printf '{"version":"%s","build":%s,"dmg":"Ormeggio-%s.dmg","notes":%s}\n' "$VERSION" "$BUILD" "$VERSION" "$NOTES" > out/latest.json
+          fi
           cd out
-          git init -q -b builds
+          git init -q -b "$BRANCH"
           git config user.name "ormeggio-ci"
           git config user.email "ci@users.noreply.github.com"
           git add .
           git commit -qm "Build ${GITHUB_SHA::7}: ${{ job.status }}"
-          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" builds
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" "$BRANCH"

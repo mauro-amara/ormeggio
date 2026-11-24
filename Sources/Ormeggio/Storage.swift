@@ -94,6 +94,8 @@ final class SceneStore {
         var scene = scene
         if let index = scenes.firstIndex(where: { $0.name.caseInsensitiveCompare(scene.name) == .orderedSame }) {
             scene.id = scenes[index].id
+            // Lo zoom delle app lo sceglie l'utente: aggiornando la scena lo conservo.
+            if scene.appZoom == nil { scene.appZoom = scenes[index].appZoom }
             scenes[index] = scene
         } else {
             scenes.append(scene)

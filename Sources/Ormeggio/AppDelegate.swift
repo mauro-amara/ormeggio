@@ -10,6 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private lazy var scenesWindow = ScenesWindowController(engine: engine) { [weak self] in
         self?.saveScene()
     }
+    private let updater = Updater()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -28,10 +29,87 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         if !UserDefaults.standard.bool(forKey: "welcomeShown") {
             showWelcome()
+        } else if UserDefaults.standard.string(forKey: "updatedFrom") != nil {
+            showUpdateCompleted()
         } else if !WindowManager.isTrusted(prompt: false) {
             _ = WindowManager.isTrusted(prompt: true)
         }
         engine.start()
+        updater.onChange = { [weak self] in self?.updateIcon() }
+        updater.start()
+    }
+
+    // MARK: Aggiornamenti
+
+    /// Dopo un aggiornamento: conferma e, se serve, chiede di nuovo il permesso di Accessibilità.
+    private func showUpdateCompleted() {
+        UserDefaults.standard.removeObject(forKey: "updatedFrom")
+        let trusted = WindowManager.isTrusted(prompt: false)
+        let alert = NSAlert()
+        alert.messageText = "Ormeggio aggiornato alla versione \(updater.currentVersion)"
+        if trusted {
+            alert.informativeText = "Tutto pronto. Le tue scene sono al loro posto."
+            alert.addButton(withTitle: "OK")
+            NSApp.activate()
+            _ = alert.runModal()
+            return
+        }
+        alert.informativeText = "macOS chiede di riattivare Ormeggio in Accessibilità, perché l'app è nuova. Premi \"Continua\": si apre Impostazioni di Sistema, attiva Ormeggio nell'elenco e torna qui."
+        alert.addButton(withTitle: "Continua")
+        NSApp.activate()
+        _ = alert.runModal()
+        // Tolgo il permesso della versione precedente, così macOS mostra Ormeggio da riattivare.
+        if let bundleID = Bundle.main.bundleIdentifier {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
+            process.arguments = ["reset", "Accessibility", bundleID]
+            try? process.run()
+            process.waitUntilExit()
+        }
+        if !WindowManager.isTrusted(prompt: true) {
+            openAccessibilitySettings()
+        }
+    }
+
+    @objc private func installUpdate() {
+        guard let info = updater.available else { return }
+        let alert = NSAlert()
+        alert.messageText = "È disponibile Ormeggio \(info.version)"
+        var text = "Hai la versione \(updater.currentVersion)."
+        if let notes = info.notes, !notes.isEmpty { text += "\n\nNovità: \(notes)" }
+        text += "\n\nPremi \"Aggiorna\": Ormeggio scarica la nuova versione, si chiude, si aggiorna e si riapre da solo. Le scene restano."
+        alert.informativeText = text
+        alert.addButton(withTitle: "Aggiorna")
+        alert.addButton(withTitle: "Più tardi")
+        NSApp.activate()
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        Task { @MainActor in
+            do {
+                try await self.updater.install(info)
+            } catch {
+                Log.write("Aggiornamento non riuscito: \(error.localizedDescription)")
+                let failure = NSAlert()
+                failure.messageText = "Aggiornamento non riuscito"
+                failure.informativeText = "Ormeggio non è riuscito ad aggiornarsi da solo: \(error.localizedDescription). Scarica la nuova versione e trascinala in Applicazioni."
+                failure.addButton(withTitle: "Scarica")
+                failure.addButton(withTitle: "Chiudi")
+                NSApp.activate()
+                if failure.runModal() == .alertFirstButtonReturn, let url = self.updater.downloadURL(for: info) {
+                    _ = NSWorkspace.shared.open(url)
+                }
+            }
+        }
+    }
+
+    @objc private func checkForUpdates() {
+        Task { @MainActor in
+            let info = await self.updater.check()
+            if info != nil {
+                self.installUpdate()
+            } else {
+                self.showMessage("Aggiornamenti", "Hai già l'ultima versione di Ormeggio (\(self.updater.currentVersion)).")
+            }
+        }
     }
 
     /// Riaprendo l'app dal Finder (o dal Launchpad) si apre la finestra delle scene.
@@ -88,7 +166,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             image.isTemplate = true
             image.size = NSSize(width: 18, height: 18)
             button.image = image
-            button.title = engine.state == .needsPermission ? "!" : ""
+            button.title = engine.state == .needsPermission ? "!" : (updater.available != nil ? "•" : "")
             button.imagePosition = .imageLeft
         } else {
             button.image = nil
@@ -108,6 +186,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let fingerprint = DisplayManager.fingerprint(displays)
         let active = engine.activeScene
 
+        if let update = updater.available {
+            menu.addItem(commandItem("⬆︎ Aggiorna alla versione \(update.version)…", #selector(installUpdate)))
+            menu.addItem(.separator())
+        }
         if engine.isWorking {
             menu.addItem(infoItem("Sto sistemando le finestre…"))
             menu.addItem(infoItem("Non toccare mouse e tastiera per qualche secondo"))
@@ -175,6 +257,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settingsMenu.addItem(commandItem("Diagnostica…", #selector(showDiagnostics)))
         settingsMenu.addItem(commandItem("Salva diagnostica per l'assistenza…", #selector(exportReport)))
         settingsMenu.addItem(commandItem("Apri la cartella dei dati", #selector(openDataFolder)))
+        settingsMenu.addItem(.separator())
+        settingsMenu.addItem(commandItem("Cerca aggiornamenti…", #selector(checkForUpdates)))
+        settingsMenu.addItem(infoItem("Versione \(updater.currentVersion)"))
         settingsMenu.addItem(.separator())
         settingsMenu.addItem(commandItem("Disinstalla Ormeggio…", #selector(uninstall)))
         let settingsItem = NSMenuItem(title: "Impostazioni", action: nil, keyEquivalent: "")

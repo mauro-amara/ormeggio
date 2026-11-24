@@ -17,6 +17,13 @@ cp Resources/MenuIcon.png Resources/MenuIcon@2x.png "$APP/Contents/Resources/"
 
 # Firma: Developer ID se disponibile (variabile SIGN_IDENTITY), altrimenti firma locale.
 IDENTITY="${SIGN_IDENTITY:--}"
-codesign --force --options runtime --timestamp=none --entitlements Resources/Ormeggio.entitlements --sign "$IDENTITY" "$APP"
+# Requisito esplicito sull'identificativo: aiuta macOS a riconoscere le versioni successive come la stessa app.
+REQUIREMENT='=designated => identifier "com.sparkfabrik.ormeggio"'
+if [ "$IDENTITY" = "-" ]; then
+  codesign --force --options runtime --timestamp=none --entitlements Resources/Ormeggio.entitlements \
+    --requirements "$REQUIREMENT" --sign - "$APP"
+else
+  codesign --force --options runtime --timestamp --entitlements Resources/Ormeggio.entitlements --sign "$IDENTITY" "$APP"
+fi
 codesign --verify --verbose=2 "$APP"
 echo "Creata $APP"

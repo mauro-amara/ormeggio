@@ -2,13 +2,13 @@
 
 App per la barra dei menu del Mac che salva e richiama **scene**. Una scena è il Mac sistemato come ti serve: app aperte, finestre su ogni monitor e su ogni scrivania, scala dei monitor, cartelle del Finder, schede del browser. La salvi con un nome (Ufficio 1, Ufficio 2, Mac da solo) e quando la richiami Ormeggio rimette tutto a posto.
 
-Versione 0.2.2. Requisiti completi nel documento "Requisiti app layout monitor per Mac".
+Versione 0.2.3. Requisiti completi nel documento "Requisiti app layout monitor per Mac".
 
 ## Per chi la usa
 
 ### Installare
 
-1. Apri `Ormeggio-0.2.2.dmg` e trascina **Ormeggio** su **Applicazioni**.
+1. Apri `Ormeggio-0.2.3.dmg` e trascina **Ormeggio** su **Applicazioni**.
 2. Apri Ormeggio da Applicazioni. Se macOS dice che non può verificare lo sviluppatore: Impostazioni di Sistema > Privacy e sicurezza, in fondo premi **Apri comunque**.
 3. Nella finestra di benvenuto premi **Continua** e attiva Ormeggio nell'elenco **Accessibilità**.
 
@@ -23,6 +23,14 @@ L'icona di Ormeggio compare nella barra in alto, vicino all'orologio.
 Il salvataggio legge le finestre di tutte le scrivanie senza farle scorrere. Quando richiami una scena, Ormeggio passa solo dalle scrivanie dove deve spostare una finestra: in quei secondi non toccare mouse e tastiera.
 
 La prima volta che salvi con Finder, Chrome o Safari aperti, macOS chiede se Ormeggio può controllarli: rispondi OK. Serve per sapere quali cartelle e schede sono aperte.
+
+### Zoom
+
+Lo zoom di Chrome Ormeggio lo salva da solo, sito per sito, e lo rimette quando richiami la scena. Per le altre app (per esempio Slack): Le tue scene > menu della scena > **Zoom delle app…**, scegli l'ingrandimento di ogni app.
+
+### Aggiornamenti
+
+Quando esce una nuova versione, nel menu di Ormeggio compare **Aggiorna alla versione…**. Premilo: Ormeggio scarica la nuova versione, si chiude, si aggiorna e si riapre da solo. Puoi controllare anche da Impostazioni > **Cerca aggiornamenti…**.
 
 ### Se qualcosa non va
 

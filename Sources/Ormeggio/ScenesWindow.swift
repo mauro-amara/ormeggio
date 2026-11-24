@@ -94,6 +94,57 @@ final class ScenesModel: ObservableObject {
         onSaveRequested()
     }
 
+    /// Sceglie lo zoom di ogni app della scena (Chrome escluso: il suo zoom si salva da solo).
+    func editZoom(_ scene: SavedScene) {
+        let excluded: Set<String> = [BrowserBridge.chromeID, FinderBridge.bundleID, Engine.settingsID]
+        var seen = Set<String>()
+        let apps = scene.windows.compactMap { window -> (bundleID: String, name: String)? in
+            guard !excluded.contains(window.bundleID), seen.insert(window.bundleID).inserted else { return nil }
+            return (window.bundleID, window.appName)
+        }
+        let options: [(title: String, steps: Int?)] = [
+            ("Non toccare", nil), ("Normale (100%)", 0),
+            ("+1 scatto", 1), ("+2 scatti", 2), ("+3 scatti", 3), ("+4 scatti", 4),
+            ("−1 scatto", -1), ("−2 scatti", -2)
+        ]
+        let alert = NSAlert()
+        alert.messageText = "Zoom delle app in \"\(scene.name)\""
+        guard !apps.isEmpty else {
+            alert.informativeText = "In questa scena non ci sono app di cui scegliere lo zoom. Lo zoom di Chrome Ormeggio lo salva da solo, sito per sito."
+            alert.addButton(withTitle: "OK")
+            _ = alert.runModal()
+            return
+        }
+        let rowHeight: CGFloat = 30
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 380, height: rowHeight * CGFloat(apps.count)))
+        var popups: [NSPopUpButton] = []
+        for (offset, app) in apps.enumerated() {
+            let y = CGFloat(apps.count - 1 - offset) * rowHeight
+            let label = NSTextField(labelWithString: app.name)
+            label.frame = NSRect(x: 0, y: y + 4, width: 190, height: 20)
+            let popup = NSPopUpButton(frame: NSRect(x: 200, y: y, width: 180, height: 26), pullsDown: false)
+            popup.addItems(withTitles: options.map { $0.title })
+            let current = scene.appZoom?[app.bundleID]
+            popup.selectItem(at: options.firstIndex(where: { $0.steps == current }) ?? 0)
+            container.addSubview(label)
+            container.addSubview(popup)
+            popups.append(popup)
+        }
+        alert.informativeText = "Quando richiami la scena, Ormeggio porta ogni app allo zoom che scegli qui, come se premessi cmd + o cmd -. Lo zoom di Chrome lo salva da solo, sito per sito."
+        alert.accessoryView = container
+        alert.addButton(withTitle: "Salva")
+        alert.addButton(withTitle: "Annulla")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        var values: [String: Int] = [:]
+        for (offset, popup) in popups.enumerated() {
+            let index = popup.indexOfSelectedItem
+            if options.indices.contains(index), let steps = options[index].steps {
+                values[apps[offset].bundleID] = steps
+            }
+        }
+        engine.setAppZoom(id: scene.id, values)
+    }
+
     func summary(of scene: SavedScene) -> String {
         let monitors = scene.displays.map(\.name).joined(separator: " + ")
         let desktops = scene.displays.compactMap(\.spaceCount).reduce(0, +)
@@ -192,6 +243,7 @@ struct SceneRow: View {
             Button("Richiama") { model.recall(scene) }
                 .buttonStyle(.borderedProminent)
             Menu {
+                Button("Zoom delle app…") { model.editZoom(scene) }
                 Button("Rinomina…") { model.rename(scene) }
                 Button("Elimina…", role: .destructive) { model.delete(scene) }
             } label: {
