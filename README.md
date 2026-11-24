@@ -1,16 +1,50 @@
 # Ormeggio
 
-App per la barra dei menu del Mac che salva e richiama **scene**. Una scena è il Mac sistemato come ti serve: app aperte, finestre su ogni monitor e su ogni scrivania, scala dei monitor, cartelle del Finder, schede del browser. La salvi con un nome (Ufficio 1, Ufficio 2, Mac da solo) e quando la richiami Ormeggio rimette tutto a posto.
+App per la barra dei menu del Mac che salva e richiama **scene** di lavoro: ogni finestra al suo posto, con un clic.
 
-Versione 0.2.3. Requisiti completi nel documento "Requisiti app layout monitor per Mac".
+## Il problema
+
+Chi lavora con un Mac portatile lo attacca e lo stacca da monitor diversi più volte al giorno: l'ufficio, casa, una sala riunioni. A ogni cambio macOS sposta tutte le finestre sullo schermo del portatile, e quando il monitor torna le finestre spesso non tornano dove stavano. Le scrivanie del monitor esterno vanno ricreate, la risoluzione e lo zoom vanno sistemati app per app, e le finestre dei profili di Chrome si mescolano.
+
+Gli strumenti che esistono fanno un pezzo ciascuno. **Stay** ricorda le finestre per monitor, ma non ricrea le scrivanie e non tocca lo zoom. **Hammerspoon** può fare quasi tutto, con script in Lua da scrivere e mantenere. **Rectangle** e **Magnet** affiancano le finestre con una scorciatoia, senza ricordare niente.
+
+## La soluzione
+
+Una **scena** è il Mac sistemato come ti serve. Ti sistemi una volta, salvi la scena con un nome (Ufficio, Casa, Mac da solo) e la richiami con un clic dall'ancora nella barra dei menu, o da sola quando ricolleghi gli stessi monitor. Ormeggio rimette in ordine:
+
+- **Monitor**: risoluzione di ogni monitor.
+- **Scrivanie**: quante ne ha ogni monitor, create o tolte da Mission Control.
+- **App e finestre**: apre le app chiuse e rimette ogni finestra sul suo monitor, sulla sua scrivania, nella sua posizione, anche se ridotta nel Dock o a tutto schermo.
+- **Finder e browser**: riapre le cartelle del Finder e le finestre di Chrome nel profilo giusto, con le loro schede.
+- **Zoom**: lo zoom di Chrome sito per sito e lo zoom delle altre app.
+
+Alla fine un riepilogo a schermo dice cosa ha sistemato e cosa no, con il motivo.
+
+**Presentazione**: [docs/presentazione](docs/presentazione) contiene una presentazione di 14 slide (file HTML da scaricare e aprire nel browser, funziona anche offline) e il suo sorgente in Markdown.
 
 ## Per chi la usa
 
 ### Installare
 
-1. Apri `Ormeggio-0.2.3.dmg` e trascina **Ormeggio** su **Applicazioni**.
+1. Scarica l'ultima versione dal ramo [`builds`](https://github.com/mauro-amara/ormeggio/tree/builds) (file `Ormeggio-<versione>.dmg`), aprila e trascina **Ormeggio** su **Applicazioni**.
 2. Apri Ormeggio da Applicazioni. Se macOS dice che non può verificare lo sviluppatore: Impostazioni di Sistema > Privacy e sicurezza, in fondo premi **Apri comunque**.
 3. Nella finestra di benvenuto premi **Continua** e attiva Ormeggio nell'elenco **Accessibilità**.
+
+In alternativa, questo comando nel Terminale scarica e installa l'ultima versione, senza gli avvisi di macOS:
+
+```sh
+mkdir -p /tmp/ormeggio-dmg && \
+curl -fsSL https://raw.githubusercontent.com/mauro-amara/ormeggio/builds/latest.json -o /tmp/ormeggio.json && \
+DMG=$(plutil -extract dmg raw -o - /tmp/ormeggio.json) && \
+curl -fL "https://raw.githubusercontent.com/mauro-amara/ormeggio/builds/$DMG" -o /tmp/Ormeggio.dmg && \
+hdiutil attach /tmp/Ormeggio.dmg -nobrowse -readonly -mountpoint /tmp/ormeggio-dmg && \
+(pkill -x Ormeggio || true) && sleep 1 && \
+rm -rf /Applications/Ormeggio.app && \
+ditto /tmp/ormeggio-dmg/Ormeggio.app /Applications/Ormeggio.app && \
+hdiutil detach /tmp/ormeggio-dmg && \
+xattr -dr com.apple.quarantine /Applications/Ormeggio.app && \
+open /Applications/Ormeggio.app
+```
 
 L'icona di Ormeggio compare nella barra in alto, vicino all'orologio.
 
@@ -20,13 +54,13 @@ L'icona di Ormeggio compare nella barra in alto, vicino all'orologio.
 - **Richiama**: clic sul nome della scena nel menu.
 - **Le tue scene…**: finestra con tutte le scene, per richiamarle, rinominarle, eliminarle.
 
-Il salvataggio legge le finestre di tutte le scrivanie senza farle scorrere. Quando richiami una scena, Ormeggio passa solo dalle scrivanie dove deve spostare una finestra: in quei secondi non toccare mouse e tastiera.
+Il salvataggio legge le finestre di tutte le scrivanie senza farle scorrere. Quando richiami una scena, Ormeggio passa solo dalle scrivanie dove deve spostare una finestra: in quei secondi non toccare mouse e tastiera. Un riquadro in basso dice quando ha finito, cosa ha sistemato e cosa no.
 
 La prima volta che salvi con Finder, Chrome o Safari aperti, macOS chiede se Ormeggio può controllarli: rispondi OK. Serve per sapere quali cartelle e schede sono aperte.
 
 ### Zoom
 
-Lo zoom di Chrome Ormeggio lo salva da solo, sito per sito, e lo rimette quando richiami la scena. Per le altre app (per esempio Slack): Le tue scene > menu della scena > **Zoom delle app…**, scegli l'ingrandimento di ogni app.
+Lo zoom di Chrome Ormeggio lo salva da solo, sito per sito e profilo per profilo, e lo rimette quando richiami la scena. Chrome scrive lo zoom con qualche secondo di ritardo: Ormeggio lo rilegge 12 secondi dopo il salvataggio e aggiorna la scena. Per le altre app (per esempio Slack): Le tue scene > menu della scena > **Zoom delle app…**, scegli l'ingrandimento di ogni app.
 
 ### Aggiornamenti
 
