@@ -4,23 +4,13 @@ App per la barra dei menu del Mac che salva e richiama **scene** di lavoro: ogni
 
 ## Il problema
 
-Chi lavora con un Mac portatile lo attacca e lo stacca da monitor diversi più volte al giorno: l'ufficio, casa, una sala riunioni. A ogni cambio macOS sposta tutte le finestre sullo schermo del portatile, e quando il monitor torna le finestre spesso non tornano dove stavano. Le scrivanie del monitor esterno vanno ricreate, la risoluzione e lo zoom vanno sistemati app per app, e le finestre dei profili di Chrome si mescolano.
+Chi lavora con il Mac portatile lo attacca e lo stacca da monitor diversi più volte al giorno: ufficio, casa, sala riunioni. Ogni volta macOS sposta tutte le finestre sullo schermo del portatile. Quando ricolleghi il monitor, spesso le finestre non tornano dove stavano. Le scrivanie del monitor esterno vanno ricreate, risoluzione e zoom vanno sistemati app per app, le finestre dei profili di Chrome si mescolano. Ogni cambio di postazione vuol dire rimettere tutto in ordine a mano.
 
-Gli strumenti che esistono fanno un pezzo ciascuno. **Stay** ricorda le finestre per monitor, ma non ricrea le scrivanie e non tocca lo zoom. **Hammerspoon** può fare quasi tutto, con script in Lua da scrivere e mantenere. **Rectangle** e **Magnet** affiancano le finestre con una scorciatoia, senza ricordare niente.
+Gli strumenti che esistono risolvono un pezzo ciascuno. Stay ricorda le finestre ma non le scrivanie né lo zoom, Hammerspoon richiede script da scrivere e mantenere, Rectangle e Magnet affiancano le finestre ma non ricordano niente.
 
 ## La soluzione
 
-Una **scena** è il Mac sistemato come ti serve. Ti sistemi una volta, salvi la scena con un nome (Ufficio, Casa, Mac da solo) e la richiami con un clic dall'ancora nella barra dei menu, o da sola quando ricolleghi gli stessi monitor. Ormeggio rimette in ordine:
-
-- **Monitor**: risoluzione di ogni monitor.
-- **Scrivanie**: quante ne ha ogni monitor, create o tolte da Mission Control.
-- **App e finestre**: apre le app chiuse e rimette ogni finestra sul suo monitor, sulla sua scrivania, nella sua posizione, anche se ridotta nel Dock o a tutto schermo.
-- **Finder e browser**: riapre le cartelle del Finder e le finestre di Chrome nel profilo giusto, con le loro schede.
-- **Zoom**: lo zoom di Chrome sito per sito e lo zoom delle altre app.
-
-Alla fine un riepilogo a schermo dice cosa ha sistemato e cosa no, con il motivo.
-
-**Presentazione**: [docs/presentazione](docs/presentazione) contiene una presentazione di 14 slide (file HTML da scaricare e aprire nel browser, funziona anche offline) e il suo sorgente in Markdown.
+Ormeggio è un'app gratuita per la barra dei menu. Sistemi il Mac come ti serve e salvi una **scena** con un nome: Ufficio, Casa, Mac da solo. Quando la richiami, con un clic o in automatico quando ricolleghi gli stessi monitor, Ormeggio rimette risoluzione, scrivanie, app aperte, posizione di ogni finestra, cartelle del Finder, finestre di Chrome nel profilo giusto con le loro schede, e zoom. Alla fine un riquadro a schermo dice cosa ha sistemato e cosa no, con il motivo.
 
 ## Per chi la usa
 
