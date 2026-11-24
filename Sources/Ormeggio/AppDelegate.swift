@@ -30,7 +30,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         engine.onActivity = { report in HUD.shared.show(report) }
         HUD.shared.sendDiagnostics = { [weak self] in self?.sendReport() }
         Notifier.shared.start()
-        Notifier.shared.onOpenUpdate = { [weak self] in self?.showWhatsNew() }
+        Notifier.shared.onOpenUpdate = { [weak self] in self?.showWhatsNew(afterUpdate: false) }
         engine.askChromeProfiles = { [weak self] titles, profiles in
             self?.askChromeProfiles(titles: titles, profiles: profiles) ?? []
         }
@@ -99,7 +99,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     /// Le novità dell'ultima versione installata, nel riquadro: una per riga.
-    @objc private func showWhatsNew() {
+    @objc private func showWhatsNewFromMenu() {
         showWhatsNew(afterUpdate: false)
     }
 
@@ -449,7 +449,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settingsMenu.addItem(.separator())
         settingsMenu.addItem(commandItem("Cerca aggiornamenti…", #selector(checkForUpdates), icon: "arrow.triangle.2.circlepath"))
         if UserDefaults.standard.string(forKey: "lastUpdateNotes")?.isEmpty == false {
-            settingsMenu.addItem(commandItem("Novità dell'ultima versione", #selector(showWhatsNew), icon: "sparkles"))
+            settingsMenu.addItem(commandItem("Novità dell'ultima versione", #selector(showWhatsNewFromMenu), icon: "sparkles"))
         }
         settingsMenu.addItem(infoItem("Versione \(updater.currentVersion)", icon: "info.circle"))
         settingsMenu.addItem(.separator())
