@@ -7,9 +7,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem?
     private let store = SceneStore()
     private lazy var engine = Engine(store: store)
-    private lazy var scenesWindow = ScenesWindowController(engine: engine) { [weak self] in
-        self?.saveScene()
-    }
+    private lazy var scenesWindow = ScenesWindowController(
+        engine: engine,
+        version: updater.currentVersion,
+        onSave: { [weak self] in self?.saveScene() },
+        onRepair: { [weak self] in self?.repairPermission(atLaunch: false) }
+    )
     private let updater = Updater()
     private var trustTimer: Timer?
 
@@ -22,6 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem = item
 
         engine.onStateChange = { [weak self] in self?.updateIcon() }
+        engine.onActivity = { report in HUD.shared.show(report) }
         engine.askChromeProfiles = { [weak self] titles, profiles in
             self?.askChromeProfiles(titles: titles, profiles: profiles) ?? []
         }
@@ -230,101 +234,125 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let displays = DisplayManager.activeDisplays()
         let fingerprint = DisplayManager.fingerprint(displays)
         let active = engine.activeScene
+        let trusted = WindowManager.isTrusted(prompt: false)
 
         if let update = updater.available {
-            menu.addItem(commandItem("⬆︎ Aggiorna alla versione \(update.version)…", #selector(installUpdate)))
+            menu.addItem(commandItem("Aggiorna alla versione \(update.version)…", #selector(installUpdate), icon: "arrow.down.circle.fill"))
             menu.addItem(.separator())
         }
+
+        // Stato
         if engine.isWorking {
-            menu.addItem(infoItem("Sto sistemando le finestre…"))
-            menu.addItem(infoItem("Non toccare mouse e tastiera per qualche secondo"))
-            menu.addItem(.separator())
+            menu.addItem(infoItem("Sto sistemando le finestre…", icon: "hourglass", subtitle: "Non toccare mouse e tastiera"))
+        } else if let active {
+            menu.addItem(infoItem("Scena attiva: \(active.name)", icon: "checkmark.seal.fill"))
         } else {
-            menu.addItem(infoItem(active.map { "Scena attiva: \($0.name)" } ?? "Nessuna scena attiva"))
+            menu.addItem(infoItem("Nessuna scena attiva", icon: "moon.zzz"))
         }
-        if !WindowManager.isTrusted(prompt: false) {
-            menu.addItem(commandItem("⚠︎ Ripara il permesso di Accessibilità…", #selector(repairPermissionFromMenu)))
-        }
-
-        // Monitor riconosciuti da macOS, con risoluzione e scrivanie.
-        menu.addItem(.separator())
-        menu.addItem(infoItem(displays.count == 1 ? "Monitor collegato" : "Monitor collegati"))
-        let layouts = SpacesManager.layouts(for: displays)
-        for display in displays {
-            var text = "   \(display.name)"
-            if let mode = display.mode { text += " · \(mode.label)" }
-            if let layout = layouts[display.id] { text += " · \(layout.count) \(layout.count == 1 ? "scrivania" : "scrivanie")" }
-            menu.addItem(infoItem(text))
+        if !trusted {
+            menu.addItem(commandItem("Ripara il permesso di Accessibilità…", #selector(repairPermissionFromMenu), icon: "exclamationmark.triangle.fill"))
         }
 
+        // Scene: prima quelle di questi monitor
         let scenes = store.scenes.sorted { lhs, rhs in
             let lhsHere = lhs.fingerprint == fingerprint
             let rhsHere = rhs.fingerprint == fingerprint
             if lhsHere != rhsHere { return lhsHere }
             return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
         }
-
         menu.addItem(.separator())
+        menu.addItem(NSMenuItem.sectionHeader(title: "Scene"))
         if scenes.isEmpty {
-            menu.addItem(infoItem("Nessuna scena salvata"))
+            menu.addItem(infoItem("Nessuna scena salvata", icon: "tray"))
         } else {
-            menu.addItem(infoItem("Richiama una scena"))
-            for scene in scenes {
-                var title = scene.name
-                if scene.fingerprint != fingerprint { title += "  (altri monitor)" }
-                let item = commandItem(title, #selector(recallScene(_:)))
+            for (offset, scene) in scenes.enumerated() {
+                let key = offset < 9 ? "\(offset + 1)" : ""
+                let item = commandItem(scene.name, #selector(recallScene(_:)), icon: SceneIcons.icon(for: scene), key: key)
                 item.representedObject = scene.id.uuidString
                 item.state = scene.id == active?.id ? .on : .off
-                item.isEnabled = !engine.isWorking
+                item.isEnabled = !engine.isWorking && trusted
+                var details = [scene.fingerprint == fingerprint ? "Questi monitor" : "Altri monitor"]
+                details.append("\(scene.windows.count) finestre")
+                if scene.autoApply { details.append("automatica") }
+                setSubtitle(item, details.joined(separator: " · "))
                 menu.addItem(item)
             }
         }
-
-        menu.addItem(.separator())
-        let saveItem = commandItem("Salva scena…", #selector(saveSceneFromMenu))
+        let saveItem = commandItem("Salva scena…", #selector(saveSceneFromMenu), icon: "plus.circle", key: "s")
         saveItem.isEnabled = !engine.isWorking
         menu.addItem(saveItem)
-        menu.addItem(commandItem("Le tue scene…", #selector(showScenes)))
+        menu.addItem(commandItem("Le tue scene…", #selector(showScenes), icon: "square.grid.2x2", key: "o"))
 
+        // Monitor riconosciuti da macOS, con risoluzione e scrivanie
+        menu.addItem(.separator())
+        menu.addItem(NSMenuItem.sectionHeader(title: displays.count == 1 ? "Monitor collegato" : "Monitor collegati"))
+        let layouts = SpacesManager.layouts(for: displays)
+        for display in displays {
+            var details: [String] = []
+            if let mode = display.mode { details.append(mode.label) }
+            if let layout = layouts[display.id] { details.append("\(layout.count) \(layout.count == 1 ? "scrivania" : "scrivanie")") }
+            let item = infoItem(display.name, icon: display.isBuiltin ? "laptopcomputer" : "display",
+                                subtitle: details.joined(separator: " · "))
+            menu.addItem(item)
+        }
+
+        // Impostazioni
         menu.addItem(.separator())
         let settingsMenu = NSMenu()
         settingsMenu.autoenablesItems = false
-        let autoItem = commandItem("Richiama da sola la scena quando cambiano i monitor", #selector(toggleAutoApply))
+        let autoItem = commandItem("Richiamo automatico quando cambiano i monitor", #selector(toggleAutoApply), icon: "bolt.fill")
         autoItem.state = engine.autoApplyEnabled ? .on : .off
         settingsMenu.addItem(autoItem)
-        let spacesItem = commandItem("Gestisci le scrivanie", #selector(toggleManageSpaces))
+        let spacesItem = commandItem("Gestisci le scrivanie", #selector(toggleManageSpaces), icon: "square.on.square")
         spacesItem.state = engine.manageSpaces ? .on : .off
         settingsMenu.addItem(spacesItem)
-        let loginItem = commandItem("Avvia quando accendi il Mac", #selector(toggleLogin))
+        let loginItem = commandItem("Avvia quando accendi il Mac", #selector(toggleLogin), icon: "power")
         loginItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
         settingsMenu.addItem(loginItem)
         settingsMenu.addItem(.separator())
-        settingsMenu.addItem(commandItem("Diagnostica…", #selector(showDiagnostics)))
-        settingsMenu.addItem(commandItem("Salva diagnostica per l'assistenza…", #selector(exportReport)))
-        settingsMenu.addItem(commandItem("Apri la cartella dei dati", #selector(openDataFolder)))
+        settingsMenu.addItem(commandItem("Diagnostica…", #selector(showDiagnostics), icon: "stethoscope"))
+        settingsMenu.addItem(commandItem("Salva diagnostica per l'assistenza…", #selector(exportReport), icon: "doc.text"))
+        settingsMenu.addItem(commandItem("Apri la cartella dei dati", #selector(openDataFolder), icon: "folder"))
         settingsMenu.addItem(.separator())
-        settingsMenu.addItem(commandItem("Cerca aggiornamenti…", #selector(checkForUpdates)))
-        settingsMenu.addItem(infoItem("Versione \(updater.currentVersion)"))
+        settingsMenu.addItem(commandItem("Cerca aggiornamenti…", #selector(checkForUpdates), icon: "arrow.triangle.2.circlepath"))
+        settingsMenu.addItem(infoItem("Versione \(updater.currentVersion)", icon: "info.circle"))
         settingsMenu.addItem(.separator())
-        settingsMenu.addItem(commandItem("Disinstalla Ormeggio…", #selector(uninstall)))
+        settingsMenu.addItem(commandItem("Disinstalla Ormeggio…", #selector(uninstall), icon: "trash"))
         let settingsItem = NSMenuItem(title: "Impostazioni", action: nil, keyEquivalent: "")
+        settingsItem.image = symbol("gearshape")
         settingsItem.submenu = settingsMenu
         menu.addItem(settingsItem)
 
         menu.addItem(.separator())
-        menu.addItem(commandItem("Esci da Ormeggio", #selector(quit)))
+        menu.addItem(commandItem("Esci da Ormeggio", #selector(quit), icon: "xmark.circle", key: "q"))
     }
 
-    private func infoItem(_ title: String) -> NSMenuItem {
+    private func symbol(_ name: String) -> NSImage? {
+        NSImage(systemSymbolName: name, accessibilityDescription: nil)
+    }
+
+    private func setSubtitle(_ item: NSMenuItem, _ subtitle: String) {
+        guard !subtitle.isEmpty else { return }
+        if #available(macOS 14.4, *) {
+            item.subtitle = subtitle
+        } else {
+            item.title += "  ·  " + subtitle
+        }
+    }
+
+    private func infoItem(_ title: String, icon: String? = nil, subtitle: String? = nil) -> NSMenuItem {
         let item = NSMenuItem(title: title, action: nil, keyEquivalent: "")
         item.isEnabled = false
+        if let icon { item.image = symbol(icon) }
+        if let subtitle { setSubtitle(item, subtitle) }
         return item
     }
 
-    private func commandItem(_ title: String, _ selector: Selector) -> NSMenuItem {
-        let item = NSMenuItem(title: title, action: selector, keyEquivalent: "")
+    private func commandItem(_ title: String, _ selector: Selector, icon: String? = nil, key: String = "") -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: selector, keyEquivalent: key)
         item.target = self
         item.isEnabled = true
+        if let icon { item.image = symbol(icon) }
         return item
     }
 
@@ -361,7 +389,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let alert = NSAlert()
         alert.messageText = "Salva scena"
         let monitors = DisplayManager.activeDisplays().map(\.name).joined(separator: " + ")
-        alert.informativeText = "Monitor riconosciuti: \(monitors).\n\nSalvo app aperte, finestre su ogni monitor e scrivania, scala dei monitor, cartelle del Finder e schede del browser. Se il nome esiste già, aggiorno quella scena.\n\nPer vedere tutte le finestre passo da ogni scrivania: per qualche secondo non toccare mouse e tastiera."
+        alert.informativeText = "Monitor riconosciuti: \(monitors).\n\nSalvo app aperte, finestre su ogni monitor e scrivania, scala dei monitor, cartelle del Finder, schede e zoom del browser. Se il nome esiste già, aggiorno quella scena.\n\nLavoro dietro le quinte: le scrivanie restano dove sono."
         alert.accessoryView = container
         alert.addButton(withTitle: "Salva")
         alert.addButton(withTitle: "Annulla")

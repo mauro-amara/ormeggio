@@ -96,6 +96,7 @@ final class SceneStore {
             scene.id = scenes[index].id
             // Lo zoom delle app lo sceglie l'utente: aggiornando la scena lo conservo.
             if scene.appZoom == nil { scene.appZoom = scenes[index].appZoom }
+            if scene.icon == nil { scene.icon = scenes[index].icon }
             scenes[index] = scene
         } else {
             scenes.append(scene)

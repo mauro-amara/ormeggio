@@ -92,4 +92,6 @@ struct SavedScene: Codable, Identifiable {
     var chromeZoom: [String: [String: Double]]?
     /// Zoom delle altre app scelto dall'utente: scatti rispetto al 100% (0 = normale).
     var appZoom: [String: Int]?
+    /// Icona scelta dall'utente (nome di un simbolo di sistema).
+    var icon: String?
 }

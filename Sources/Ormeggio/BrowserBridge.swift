@@ -168,29 +168,59 @@ enum BrowserBridge {
         return index(level) - index(defaultLevel)
     }
 
-    /// Mette in primo piano una scheda di Chrome aperta sul sito indicato, nella finestra più vicina alla posizione data.
-    static func focusChromeTab(host: String, near frame: CGRect?) -> Bool {
+    enum ChromeFocus {
+        /// Nessuna finestra di Chrome ha una scheda con quel sito.
+        case noTab
+        case failed
+        /// Scheda in primo piano; previousTab è la scheda che era attiva prima (da 1).
+        case focused(previousTab: Int?)
+    }
+
+    /// Mette in primo piano una scheda di Chrome aperta sul sito indicato.
+    /// La finestra la scelgo confrontando le sue schede con quelle salvate nella scena (così prendo il profilo giusto
+    /// anche quando più finestre stanno nella stessa posizione su scrivanie diverse), poi per posizione.
+    static func focusChromeTab(host: String, tabs: [String], near frame: CGRect?) -> ChromeFocus {
         let infos = windows(bundleID: chromeID).filter { info in
             info.urls.contains { self.host(of: $0) == host }
         }
-        guard !infos.isEmpty else { return false }
-        let chosen: BrowserWindowInfo
-        if let frame {
-            chosen = infos.min(by: { distance($0.frame, frame) < distance($1.frame, frame) }) ?? infos[0]
-        } else {
-            chosen = infos[0]
+        guard !infos.isEmpty else { return .noTab }
+        let wantedURLs = Set(tabs)
+        let wantedHosts = Set(tabs.compactMap { self.host(of: $0) })
+        func similarity(_ info: BrowserWindowInfo) -> Double {
+            let urls = Set(info.urls)
+            let hosts = Set(info.urls.compactMap { self.host(of: $0) })
+            let urlUnion = urls.union(wantedURLs).count
+            let hostUnion = hosts.union(wantedHosts).count
+            let urlScore = urlUnion == 0 ? 0 : Double(urls.intersection(wantedURLs).count) / Double(urlUnion)
+            let hostScore = hostUnion == 0 ? 0 : Double(hosts.intersection(wantedHosts).count) / Double(hostUnion)
+            return urlScore + hostScore / 2
         }
-        guard let tabIndex = chosen.urls.firstIndex(where: { self.host(of: $0) == host }) else { return false }
+        let chosen = infos.max { lhs, rhs in
+            let left = similarity(lhs)
+            let right = similarity(rhs)
+            if abs(left - right) > 0.001 { return left < right }
+            guard let frame else { return false }
+            return distance(lhs.frame, frame) > distance(rhs.frame, frame)
+        } ?? infos[0]
+        guard let tabIndex = chosen.urls.firstIndex(where: { self.host(of: $0) == host }) else { return .failed }
         let source = """
         tell application "Google Chrome"
             set w to window \(chosen.index)
+            set previousTab to active tab index of w
             set active tab index of w to \(tabIndex + 1)
             set index of w to 1
             activate
+            return previousTab as text
         end tell
         """
-        _ = run(source)
-        return true
+        guard let result = run(source) else { return .failed }
+        let previous = Int(result.trimmingCharacters(in: .whitespacesAndNewlines))
+        return .focused(previousTab: previous == tabIndex + 1 ? nil : previous)
+    }
+
+    /// Rimette attiva la scheda che c'era prima nella finestra di Chrome in primo piano.
+    static func restoreChromeTab(_ index: Int) {
+        _ = run("tell application \"Google Chrome\" to set active tab index of front window to \(index)")
     }
 
     private static func distance(_ lhs: CGRect, _ rhs: CGRect) -> CGFloat {
