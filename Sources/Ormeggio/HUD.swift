@@ -7,7 +7,6 @@ struct ActivityReport {
 
     struct Line: Identifiable {
         let id = UUID()
-        var symbol: String
         var text: String
         var warning = false
     }
@@ -175,24 +174,46 @@ private struct HUDView: View {
                 }
             }
 
-            if !report.lines.isEmpty {
+            let done = report.lines.filter { !$0.warning }
+            let warnings = report.lines.filter(\.warning)
+            if !done.isEmpty {
                 Divider()
                 VStack(alignment: .leading, spacing: 7) {
-                    ForEach(report.lines) { line in
-                        HStack(alignment: .firstTextBaseline, spacing: 9) {
-                            Image(systemName: line.symbol)
-                                .foregroundStyle(line.warning ? Color.orange : Color.secondary)
-                                .frame(width: 18)
-                            Text(line.text)
-                                .font(.callout)
-                                .foregroundStyle(line.warning ? Color.primary : Color.primary.opacity(0.85))
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
+                    ForEach(done) { line in
+                        HUDLine(text: line.text, symbol: "checkmark.circle.fill", color: .green)
+                    }
+                }
+            }
+            if !warnings.isEmpty {
+                Divider()
+                Text("DA SAPERE")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 7) {
+                    ForEach(warnings) { line in
+                        HUDLine(text: line.text, symbol: "exclamationmark.triangle.fill", color: .orange)
                     }
                 }
             }
         }
         .padding(16)
-        .frame(width: 400, alignment: .leading)
+        .frame(width: 440, alignment: .leading)
+    }
+}
+
+private struct HUDLine: View {
+    let text: String
+    let symbol: String
+    let color: Color
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 9) {
+            Image(systemName: symbol)
+                .foregroundStyle(color)
+                .frame(width: 18)
+            Text(text)
+                .font(.callout)
+                .fixedSize(horizontal: false, vertical: true)
+        }
     }
 }

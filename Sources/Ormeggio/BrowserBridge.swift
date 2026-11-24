@@ -1,8 +1,11 @@
 import AppKit
+import CoreServices
 
 /// Una finestra del browser letta con AppleScript: titolo, posizione e schede.
 struct BrowserWindowInfo {
     let index: Int
+    /// Identificativo della finestra per il browser: non cambia quando la finestra va in primo piano.
+    let id: Int?
     let title: String
     let frame: CGRect
     let urls: [String]
@@ -42,7 +45,11 @@ enum BrowserBridge {
                     repeat with t in every tab of w
                         set addresses to addresses & (URL of t) & sep
                     end repeat
-                    set output to output & (index of w) & tab & (name of w) & tab & (item 1 of b) & tab & (item 2 of b) & tab & (item 3 of b) & tab & (item 4 of b) & tab & addresses & linefeed
+                    set wid to ""
+                    try
+                        set wid to (id of w) as text
+                    end try
+                    set output to output & (index of w) & tab & wid & tab & (name of w) & tab & (item 1 of b) & tab & (item 2 of b) & tab & (item 3 of b) & tab & (item 4 of b) & tab & addresses & linefeed
                 end try
             end repeat
             return output
@@ -51,13 +58,14 @@ enum BrowserBridge {
         guard let text = run(source) else { return [] }
         return text.split(separator: "\n").compactMap { line -> BrowserWindowInfo? in
             let parts = line.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
-            guard parts.count >= 7, let index = Int(parts[0]),
-                  let left = Double(parts[2]), let top = Double(parts[3]),
-                  let right = Double(parts[4]), let bottom = Double(parts[5]) else { return nil }
-            let urls = parts[6].split(separator: "\u{1E}").map(String.init).filter { !$0.isEmpty && $0 != "missing value" }
+            guard parts.count >= 8, let index = Int(parts[0]),
+                  let left = Double(parts[3]), let top = Double(parts[4]),
+                  let right = Double(parts[5]), let bottom = Double(parts[6]) else { return nil }
+            let urls = parts[7].split(separator: "\u{1E}").map(String.init).filter { !$0.isEmpty && $0 != "missing value" }
             return BrowserWindowInfo(
                 index: index,
-                title: parts[1],
+                id: Int(parts[1]),
+                title: parts[2],
                 frame: CGRect(x: left, y: top, width: right - left, height: bottom - top),
                 urls: urls
             )
@@ -71,7 +79,12 @@ enum BrowserBridge {
             abs(info.frame.minX - frame.minX) + abs(info.frame.minY - frame.minY)
                 + abs(info.frame.width - frame.width) + abs(info.frame.height - frame.height)
         }
-        let sameTitle = infos.indices.filter { !title.isEmpty && infos[$0].title == title }
+        // macOS aggiunge al titolo di Chrome il nome del profilo ("Pagina - Mauro (lavoro)"):
+        // AppleScript dà solo il titolo della pagina.
+        let sameTitle = infos.indices.filter { index in
+            let pageTitle = infos[index].title
+            return !title.isEmpty && !pageTitle.isEmpty && (title == pageTitle || title.hasPrefix(pageTitle + " - "))
+        }
         if let best = sameTitle.min(by: { gap(infos[$0]) < gap(infos[$1]) }) { return best }
         guard let best = infos.indices.min(by: { gap(infos[$0]) < gap(infos[$1]) }) else { return nil }
         return gap(infos[best]) < 80 ? best : nil
@@ -91,6 +104,59 @@ enum BrowserBridge {
             return ChromeProfile(directory: key, name: info["name"] as? String ?? key)
         }
         .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    /// Riconosce il profilo dal titolo della finestra: macOS lo aggiunge in fondo, per esempio
+    /// "Gmail - Mauro (sparkfabrik.com)" oppure "Gmail - Caleffi".
+    static func profile(fromTitle title: String, profiles: [ChromeProfile]) -> String? {
+        guard profiles.count > 1 else { return profiles.first?.directory }
+        guard !title.isEmpty else { return nil }
+        let matches = profiles.filter { profile in
+            title.hasSuffix("(\(profile.name))") || title.hasSuffix(" - \(profile.name)") || title == profile.name
+        }
+        return matches.max { $0.name.count < $1.name.count }?.directory
+    }
+
+    /// Titolo leggibile: senza il nome del profilo in fondo e non troppo lungo.
+    static func readableTitle(_ title: String, profiles: [ChromeProfile]) -> String {
+        var text = title
+        for profile in profiles.sorted(by: { $0.name.count > $1.name.count }) {
+            for suffix in ["(\(profile.name))", " - \(profile.name)"] where text.hasSuffix(suffix) {
+                text = String(text.dropLast(suffix.count))
+                if suffix.hasPrefix("("), let range = text.range(of: " - ", options: .backwards) {
+                    text = String(text[..<range.lowerBound])
+                }
+                break
+            }
+        }
+        text = text.trimmingCharacters(in: .whitespaces)
+        return text.count > 45 ? String(text.prefix(44)) + "…" : text
+    }
+
+    /// Indirizzi di riunioni (Meet, Zoom, Teams...): una riunione finita non va riaperta.
+    static func isMeeting(_ address: String) -> Bool {
+        guard let host = host(of: address)?.lowercased() else { return false }
+        let meetingHosts = ["meet.google.com", "zoom.us", "teams.microsoft.com", "teams.live.com", "whereby.com", "meet.jit.si"]
+        return meetingHosts.contains { host == $0 || host.hasSuffix("." + $0) } || host.hasSuffix("webex.com")
+    }
+
+    /// Stato del permesso Automazione (controllare un'altra app con AppleScript), senza chiederlo.
+    static func automationStatus(bundleID: String) -> String {
+        guard NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first != nil else { return "app chiusa" }
+        var address = AEAddressDesc()
+        let bytes = Array(bundleID.utf8)
+        let created = bytes.withUnsafeBytes { buffer in
+            AECreateDesc(DescType(typeApplicationBundleID), buffer.baseAddress, buffer.count, &address)
+        }
+        guard created == OSErr(noErr) else { return "non verificabile" }
+        defer { AEDisposeDesc(&address) }
+        let status = AEDeterminePermissionToAutomateTarget(&address, AEEventClass(typeWildCard), AEEventID(typeWildCard), false)
+        switch status {
+        case noErr: return "concessa"
+        case -1743: return "NEGATA"
+        case -1744: return "da chiedere"
+        default: return "stato \(status)"
+        }
     }
 
     /// Riconosce il profilo di una finestra di Chrome dal pulsante del profilo nella barra degli strumenti.
@@ -176,14 +242,13 @@ enum BrowserBridge {
         case focused(previousTab: Int?)
     }
 
-    /// Mette in primo piano una scheda di Chrome aperta sul sito indicato.
-    /// La finestra la scelgo confrontando le sue schede con quelle salvate nella scena (così prendo il profilo giusto
-    /// anche quando più finestre stanno nella stessa posizione su scrivanie diverse), poi per posizione.
-    static func focusChromeTab(host: String, tabs: [String], near frame: CGRect?) -> ChromeFocus {
+    /// Finestre di Chrome con una scheda sul sito indicato, dalla più probabile: prima quella con le schede
+    /// più simili a quelle salvate nella scena (così prendo il profilo giusto anche quando più finestre
+    /// stanno nella stessa posizione su scrivanie diverse), poi la più vicina alla posizione data.
+    static func chromeCandidates(host: String, tabs: [String], near frame: CGRect?) -> [BrowserWindowInfo] {
         let infos = windows(bundleID: chromeID).filter { info in
             info.urls.contains { self.host(of: $0) == host }
         }
-        guard !infos.isEmpty else { return .noTab }
         let wantedURLs = Set(tabs)
         let wantedHosts = Set(tabs.compactMap { self.host(of: $0) })
         func similarity(_ info: BrowserWindowInfo) -> Double {
@@ -195,17 +260,22 @@ enum BrowserBridge {
             let hostScore = hostUnion == 0 ? 0 : Double(hosts.intersection(wantedHosts).count) / Double(hostUnion)
             return urlScore + hostScore / 2
         }
-        let chosen = infos.max { lhs, rhs in
+        return infos.sorted { lhs, rhs in
             let left = similarity(lhs)
             let right = similarity(rhs)
-            if abs(left - right) > 0.001 { return left < right }
+            if abs(left - right) > 0.001 { return left > right }
             guard let frame else { return false }
-            return distance(lhs.frame, frame) > distance(rhs.frame, frame)
-        } ?? infos[0]
-        guard let tabIndex = chosen.urls.firstIndex(where: { self.host(of: $0) == host }) else { return .failed }
+            return distance(lhs.frame, frame) < distance(rhs.frame, frame)
+        }
+    }
+
+    /// Mette in primo piano la finestra e la scheda del sito indicato.
+    static func focusChromeTab(in info: BrowserWindowInfo, host: String) -> ChromeFocus {
+        guard let tabIndex = info.urls.firstIndex(where: { self.host(of: $0) == host }) else { return .noTab }
+        let target = info.id.map { "(first window whose id is \($0))" } ?? "window \(info.index)"
         let source = """
         tell application "Google Chrome"
-            set w to window \(chosen.index)
+            set w to \(target)
             set previousTab to active tab index of w
             set active tab index of w to \(tabIndex + 1)
             set index of w to 1
@@ -216,6 +286,17 @@ enum BrowserBridge {
         guard let result = run(source) else { return .failed }
         let previous = Int(result.trimmingCharacters(in: .whitespacesAndNewlines))
         return .focused(previousTab: previous == tabIndex + 1 ? nil : previous)
+    }
+
+    /// Profilo della finestra di Chrome in primo piano, dal suo titolo.
+    static func frontChromeProfile(pid: pid_t, profiles: [ChromeProfile]) -> String? {
+        let app = AXUIElementCreateApplication(pid)
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(app, kAXFocusedWindowAttribute as CFString, &value) == .success,
+              let ref = value, CFGetTypeID(ref) == AXUIElementGetTypeID() else { return nil }
+        let window = ref as! AXUIElement
+        guard let title = WindowManager.stringAttribute(window, kAXTitleAttribute) else { return nil }
+        return profile(fromTitle: title, profiles: profiles)
     }
 
     /// Rimette attiva la scheda che c'era prima nella finestra di Chrome in primo piano.

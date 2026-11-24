@@ -123,6 +123,35 @@ enum WindowManager {
         return result == 0 && id != 0 ? id : nil
     }
 
+    // MARK: Finestre sulle altre scrivanie
+
+    private typealias CreateWithRemoteTokenFn = @convention(c) (CFData) -> Unmanaged<AXUIElement>?
+    private static let remoteTokenPointer = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "_AXUIElementCreateWithRemoteToken")
+
+    /// Titoli delle finestre di un'app su tutte le scrivanie, per numero di finestra.
+    /// L'Accessibilità elenca solo le finestre della scrivania visibile: con questa funzione privata
+    /// (la usano anche app come AltTab) si raggiungono anche le altre, senza cambiare scrivania.
+    static func titlesOnAllDesktops(pid: pid_t) -> [CGWindowID: String] {
+        guard let pointer = remoteTokenPointer else { return [:] }
+        let create = unsafeBitCast(pointer, to: CreateWithRemoteTokenFn.self)
+        var token = Data(count: 20)
+        token.replaceSubrange(0..<4, with: withUnsafeBytes(of: pid) { Data($0) })
+        token.replaceSubrange(4..<8, with: withUnsafeBytes(of: Int32(0)) { Data($0) })
+        token.replaceSubrange(8..<12, with: withUnsafeBytes(of: Int32(0x636f636f)) { Data($0) })
+        var result: [CGWindowID: String] = [:]
+        let started = Date()
+        for elementID in UInt64(0)..<UInt64(1000) {
+            if Date().timeIntervalSince(started) > 1.5 { break }
+            token.replaceSubrange(12..<20, with: withUnsafeBytes(of: elementID) { Data($0) })
+            guard let element = create(token as CFData)?.takeRetainedValue() else { continue }
+            _ = AXUIElementSetMessagingTimeout(element, 0.1)
+            guard stringAttribute(element, kAXSubroleAttribute) == kAXStandardWindowSubrole,
+                  let id = windowID(of: element) else { continue }
+            result[id] = stringAttribute(element, kAXTitleAttribute) ?? ""
+        }
+        return result
+    }
+
     // MARK: Azioni sulle finestre
 
     /// Porta la finestra in primo piano.

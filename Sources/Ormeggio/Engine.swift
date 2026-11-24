@@ -362,6 +362,8 @@ final class Engine {
 
         var result: [TrackedWindow] = []
         var seen = excluding
+        // Titoli delle finestre di Chrome sulle altre scrivanie (servono per profilo e schede).
+        var otherDesktopTitles: [pid_t: [CGWindowID: String]] = [:]
 
         func add(id: CGWindowID?, app: NSRunningApplication, live: LiveWindow?, frame: CGRect, title: String, spaces: [Int]) {
             guard let bundleID = app.bundleIdentifier,
@@ -374,7 +376,10 @@ final class Engine {
             }
             var profile: String?
             if bundleID == BrowserBridge.chromeID {
-                if let id, let known = knownProfiles[id] {
+                // Il titolo della finestra finisce con il nome del profilo: è l'indizio più affidabile.
+                if let fromTitle = BrowserBridge.profile(fromTitle: title, profiles: profiles) {
+                    profile = fromTitle
+                } else if let id, let known = knownProfiles[id] {
                     profile = known
                 } else if let live, !profiles.isEmpty {
                     profile = BrowserBridge.detectProfile(of: live, profiles: profiles)
@@ -409,7 +414,14 @@ final class Engine {
                 guard !exposedIDs.contains(system.id), spaces.count == 1, userSpaces.contains(spaces[0]),
                       system.alpha > 0, system.bounds.width >= 120, system.bounds.height >= 90 else { continue }
                 seen.insert(system.id)
-                add(id: system.id, app: app, live: nil, frame: system.bounds, title: system.name ?? "", spaces: spaces)
+                var title = system.name ?? ""
+                if title.isEmpty, app.bundleIdentifier == BrowserBridge.chromeID {
+                    if otherDesktopTitles[app.processIdentifier] == nil {
+                        otherDesktopTitles[app.processIdentifier] = WindowManager.titlesOnAllDesktops(pid: app.processIdentifier)
+                    }
+                    title = otherDesktopTitles[app.processIdentifier]?[system.id] ?? ""
+                }
+                add(id: system.id, app: app, live: nil, frame: system.bounds, title: title, spaces: spaces)
             }
         }
 
@@ -426,37 +438,65 @@ final class Engine {
         return result
     }
 
-    /// Riepilogo a schermo dopo il salvataggio.
+    /// Riepilogo a schermo dopo il salvataggio, in parole semplici.
     private func reportSaved(_ scene: SavedScene) {
         var lines: [ActivityReport.Line] = []
-        let monitors = scene.displays.map(\.name).joined(separator: " + ")
-        lines.append(.init(symbol: scene.displays.count > 1 ? "display.2" : "display", text: monitors))
         let windows = scene.windows.count
         let apps = Set(scene.windows.map(\.bundleID)).count
-        lines.append(.init(symbol: "macwindow", text: "\(windows) \(windows == 1 ? "finestra" : "finestre") di \(apps) \(apps == 1 ? "app" : "app")"))
-        let desktops = scene.displays.compactMap(\.spaceCount).reduce(0, +)
-        if desktops > 0 {
-            lines.append(.init(symbol: "square.on.square", text: "\(desktops) scrivanie"))
+        lines.append(.init(text: "\(windows) \(windows == 1 ? "finestra" : "finestre") di \(apps) app, ognuna con il suo monitor e la sua scrivania"))
+        for display in scene.displays {
+            var parts: [String] = []
+            if let count = display.spaceCount { parts.append("\(count) \(count == 1 ? "scrivania" : "scrivanie")") }
+            if let mode = display.mode { parts.append("risoluzione \(mode.label)") }
+            let label = Engine.label(display.name, builtin: display.isBuiltin)
+            lines.append(.init(text: parts.isEmpty ? label : "\(label): " + parts.joined(separator: ", ")))
         }
-        let tabs = scene.windows.compactMap(\.tabs).reduce(0) { $0 + $1.count }
-        if tabs > 0 {
-            lines.append(.init(symbol: "globe", text: "\(tabs) schede del browser"))
-        }
-        let zoomed = (scene.chromeZoom ?? [:]).values.reduce(0) { total, hosts in
-            total + hosts.values.filter { abs($0) > 0.01 }.count
-        }
-        if zoomed > 0 {
-            lines.append(.init(symbol: "plus.magnifyingglass", text: "Zoom di Chrome su \(zoomed) \(zoomed == 1 ? "sito" : "siti")"))
+        let chromeWindows = scene.windows.filter { $0.bundleID == BrowserBridge.chromeID }
+        if !chromeWindows.isEmpty {
+            lines.append(.init(text: Engine.chromeZoomSummary(scene.chromeZoom)))
+            let withoutTabs = chromeWindows.filter { ($0.tabs ?? []).isEmpty }
+            if withoutTabs.count == chromeWindows.count {
+                lines.append(.init(text: "Non riesco a leggere le schede di Chrome. In Impostazioni di Sistema > Privacy e sicurezza > Automazione, lascia che Ormeggio controlli Google Chrome.", warning: true))
+            } else if !withoutTabs.isEmpty {
+                lines.append(.init(text: "Di \(withoutTabs.count) \(withoutTabs.count == 1 ? "finestra" : "finestre") di Chrome non ho letto le schede: se le chiudi non potrò riaprirle.", warning: true))
+            }
+            if BrowserBridge.chromeProfiles().count > 1 {
+                let unknown = chromeWindows.filter { $0.chromeProfile == nil }.count
+                if unknown > 0 {
+                    lines.append(.init(text: "Di \(unknown) \(unknown == 1 ? "finestra" : "finestre") di Chrome non ho capito il profilo: il loro zoom potrebbe non tornare.", warning: true))
+                }
+            }
         }
         if windows == 0 {
-            lines.append(.init(symbol: "exclamationmark.triangle.fill", text: "Nessuna finestra trovata: controlla il permesso di Accessibilità", warning: true))
+            lines.append(.init(text: "Non ho trovato finestre: controlla il permesso di Accessibilità dal menu dell'ancora.", warning: true))
         }
         onActivity?(ActivityReport(
-            kind: windows == 0 ? .warning : .success,
+            kind: lines.contains(where: \.warning) ? .warning : .success,
             title: "Scena “\(scene.name)” salvata",
-            subtitle: "La richiami dall'ancora in alto",
+            subtitle: "Per richiamarla: clic sull'ancora in alto, poi sul suo nome",
             lines: lines
         ))
+    }
+
+    /// "Schermo del Mac" per il monitor integrato, il nome per gli altri.
+    static func label(_ name: String, builtin: Bool) -> String {
+        builtin ? "Schermo del Mac" : name
+    }
+
+    static func percent(_ level: Double) -> Int {
+        Int((pow(1.2, level) * 100).rounded())
+    }
+
+    /// Zoom di Chrome salvati in una scena, in una riga.
+    static func chromeZoomSummary(_ zoom: [String: [String: Double]]?) -> String {
+        guard let zoom else { return "Zoom di Chrome: non salvato" }
+        var custom: [String: Int] = [:]
+        for hosts in zoom.values {
+            for (host, level) in hosts where abs(level) > 0.01 { custom[host] = percent(level) }
+        }
+        guard !custom.isEmpty else { return "Zoom di Chrome: tutti i siti al 100%" }
+        let items = custom.sorted { $0.key < $1.key }.map { "\($0.key) al \($0.value)%" }
+        return "Zoom di Chrome: " + shortList(items)
     }
 
     /// Chrome scrive lo zoom nelle preferenze con qualche secondo di ritardo:
@@ -467,10 +507,16 @@ final class Engine {
             guard let scene = self.store.scene(id: id) else { return }
             let profiles = BrowserBridge.chromeProfiles()
             let zoom = Engine.chromeZoom(for: scene.windows, profiles: profiles)
-            if zoom != scene.chromeZoom {
-                self.store.update(id: id) { $0.chromeZoom = zoom }
-                Log.write("Zoom di Chrome della scena \"\(scene.name)\" aggiornato dopo il salvataggio")
-            }
+            guard zoom != scene.chromeZoom else { return }
+            self.store.update(id: id) { $0.chromeZoom = zoom }
+            Log.write("Zoom di Chrome della scena \"\(scene.name)\" aggiornato dopo il salvataggio")
+            guard !self.isBusy else { return }
+            self.onActivity?(ActivityReport(
+                kind: .success,
+                title: "Zoom di Chrome aggiornato in “\(scene.name)”",
+                subtitle: "Chrome lo salva con qualche secondo di ritardo",
+                lines: [.init(text: Engine.chromeZoomSummary(zoom))]
+            ))
         }
     }
 
@@ -506,7 +552,7 @@ final class Engine {
                 kind: .failure,
                 title: "Non posso richiamare “\(scene.name)”",
                 subtitle: "Manca il permesso di Accessibilità",
-                lines: [.init(symbol: "wrench.and.screwdriver", text: "Dal menu dell'ancora scegli \"Ripara il permesso di Accessibilità…\"")]
+                lines: [.init(text: "Clic sull'ancora in alto, poi \"Ripara il permesso di Accessibilità…\"", warning: true)]
             ))
             return
         }
@@ -516,8 +562,8 @@ final class Engine {
         var notes: [ActivityReport.Line] = []
         onActivity?(ActivityReport(
             kind: .working,
-            title: "Richiamo “\(scene.name)”…",
-            subtitle: "Non toccare mouse e tastiera per qualche secondo"
+            title: "Sto ripristinando “\(scene.name)”…",
+            subtitle: "Non toccare mouse e tastiera: ci vuole qualche secondo"
         ))
         let mouse = Input.mouseLocation
         Log.write("Richiamo la scena \"\(scene.name)\"")
@@ -529,7 +575,7 @@ final class Engine {
             guard let target = saved.mode else { continue }
             guard let live = displays.first(where: { $0.key == saved.key }) else {
                 Log.write("Scala: \(saved.name) non è collegato")
-                notes.append(.init(symbol: "display.trianglebadge.exclamationmark", text: "\(saved.name) non è collegato", warning: true))
+                notes.append(.init(text: "\(saved.name) non è collegato: le finestre che stavano lì le lascio dove sono.", warning: true))
                 continue
             }
             let current = live.mode?.label ?? "?"
@@ -541,9 +587,9 @@ final class Engine {
             Log.write("Scala di \(live.name): da \(current) a \(target.label) \(changed ? "cambiata" : "NON cambiata")")
             if changed {
                 modeChanged = true
-                notes.append(.init(symbol: "display", text: "Scala di \(live.name): \(target.label)"))
+                notes.append(.init(text: "\(Engine.label(live.name, builtin: live.isBuiltin)): risoluzione rimessa a \(target.label)"))
             } else {
-                notes.append(.init(symbol: "display.trianglebadge.exclamationmark", text: "Non sono riuscito a mettere \(live.name) a \(target.label)", warning: true))
+                notes.append(.init(text: "\(Engine.label(live.name, builtin: live.isBuiltin)): non sono riuscito a rimettere la risoluzione \(target.label)", warning: true))
             }
         }
         if modeChanged {
@@ -559,20 +605,23 @@ final class Engine {
                 wanted[live.id] = count
             }
             if !wanted.isEmpty {
-                let change = await SpacesManager.adjustSpaces(wanted: wanted, displays: displays)
-                if change.added > 0 {
-                    notes.append(.init(symbol: "plus.square.on.square", text: "\(change.added) \(change.added == 1 ? "scrivania aggiunta" : "scrivanie aggiunte")"))
-                }
-                if change.removed > 0 {
-                    notes.append(.init(symbol: "minus.square", text: "\(change.removed) \(change.removed == 1 ? "scrivania tolta" : "scrivanie tolte")"))
-                }
+                let before = SpacesManager.layouts(for: displays)
+                _ = await SpacesManager.adjustSpaces(wanted: wanted, displays: displays)
                 let after = SpacesManager.layouts(for: displays)
                 for saved in scene.displays {
                     guard let count = saved.spaceCount,
                           let live = displays.first(where: { $0.key == saved.key }),
-                          let have = after[live.id]?.count, have != count else { continue }
-                    notes.append(.init(symbol: "exclamationmark.triangle.fill",
-                                       text: "Scrivanie su \(live.name): \(have) invece di \(count)", warning: true))
+                          let had = before[live.id]?.count, let have = after[live.id]?.count else { continue }
+                    let label = Engine.label(live.name, builtin: live.isBuiltin)
+                    if have == count, had != count {
+                        let diff = abs(have - had)
+                        let what = have > had
+                            ? (diff == 1 ? "aggiunta 1 scrivania" : "aggiunte \(diff) scrivanie")
+                            : (diff == 1 ? "tolta 1 scrivania" : "tolte \(diff) scrivanie")
+                        notes.append(.init(text: "\(label): \(what), ora sono \(have) come nella scena"))
+                    } else if have != count {
+                        notes.append(.init(text: "\(label): nella scena le scrivanie sono \(count), adesso sono \(have). Non sono riuscito a sistemarle.", warning: true))
+                    }
                 }
             }
         }
@@ -585,10 +634,11 @@ final class Engine {
         }
         let runningIDs = Set(running.compactMap(\.bundleIdentifier))
         var launched = 0
+        var launchedNames: [String] = []
         for app in scene.apps where !runningIDs.contains(app.bundleID) {
             guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: app.bundleID) else {
                 Log.write("App non trovata: \(app.name)")
-                notes.append(.init(symbol: "questionmark.app", text: "\(app.name) non è installata su questo Mac", warning: true))
+                notes.append(.init(text: "\(app.name) non è installata su questo Mac", warning: true))
                 continue
             }
             let configuration = NSWorkspace.OpenConfiguration()
@@ -596,12 +646,13 @@ final class Engine {
             do {
                 _ = try await NSWorkspace.shared.openApplication(at: url, configuration: configuration)
                 launched += 1
+                launchedNames.append(app.name)
             } catch {
                 Log.write("Non riesco ad aprire \(app.name): \(error.localizedDescription)")
             }
         }
         if launched > 0 {
-            notes.append(.init(symbol: "app.badge.checkmark", text: "\(launched) \(launched == 1 ? "app aperta" : "app aperte")"))
+            notes.append(.init(text: "Ho aperto " + Engine.shortList(launchedNames)))
             await Input.pause(4)
         }
 
@@ -631,7 +682,7 @@ final class Engine {
             for index in more.indices { more[index].needsFrame = true }
             assignments += more
             if !more.isEmpty {
-                notes.append(.init(symbol: "macwindow.badge.plus", text: "\(more.count) \(more.count == 1 ? "finestra riaperta" : "finestre riaperte")"))
+                notes.append(.init(text: "Ho riaperto " + Engine.shortList(more.map { self.windowName($0.saved, profiles: profiles) })))
             }
         }
 
@@ -688,12 +739,18 @@ final class Engine {
         }
 
         // 12. Zoom di Chrome, sito per sito
-        let chromeZoom = await applyChromeZoom(scene, assignments: assignments, displays: displays)
-        if !chromeZoom.applied.isEmpty {
-            notes.append(.init(symbol: "plus.magnifyingglass", text: "Zoom di Chrome: " + Engine.shortList(chromeZoom.applied)))
-        }
-        if !chromeZoom.failed.isEmpty {
-            notes.append(.init(symbol: "exclamationmark.triangle.fill", text: "Zoom di Chrome non sistemato: " + Engine.shortList(chromeZoom.failed), warning: true))
+        let chromeZoom = await applyChromeZoom(scene, displays: displays, profiles: profiles)
+        if usesChrome {
+            if scene.chromeZoom == nil {
+                notes.append(.init(text: "In questa scena lo zoom di Chrome non è salvato: risalvala per memorizzarlo.", warning: true))
+            } else if !chromeZoom.applied.isEmpty {
+                notes.append(.init(text: "Zoom di Chrome rimesso: " + Engine.shortList(chromeZoom.applied)))
+            } else if chromeZoom.failed.isEmpty {
+                notes.append(.init(text: "Zoom di Chrome già come nella scena"))
+            }
+            if !chromeZoom.failed.isEmpty {
+                notes.append(.init(text: "Zoom di Chrome non rimesso su " + Engine.shortList(chromeZoom.failed) + ": non trovo la scheda nel profilo giusto.", warning: true))
+            }
         }
 
         // 13. Zoom delle altre app, come scelto nella scena
@@ -709,11 +766,11 @@ final class Engine {
             if done {
                 appZoomDone.append(app.localizedName ?? bundleID)
             } else {
-                notes.append(.init(symbol: "exclamationmark.triangle.fill", text: "Zoom di \(app.localizedName ?? bundleID) non sistemato", warning: true))
+                notes.append(.init(text: "Zoom di \(app.localizedName ?? bundleID) non rimesso: non trovo i comandi di zoom nel suo menu.", warning: true))
             }
         }
         if !appZoomDone.isEmpty {
-            notes.append(.init(symbol: "textformat.size", text: "Zoom di " + Engine.shortList(appZoomDone)))
+            notes.append(.init(text: "Zoom rimesso in " + Engine.shortList(appZoomDone)))
         }
 
         // 14. Scrivanie visibili come al salvataggio
@@ -731,29 +788,60 @@ final class Engine {
         refreshState()
         Log.write("Scena \"\(scene.name)\" richiamata: \(assignments.count) finestre sistemate, \(launched) app aperte, \(reopened.count) finestre riaperte")
 
-        // Riepilogo a schermo: prima le finestre, poi il resto, in fondo i problemi.
+        // Riepilogo a schermo: prima le finestre, poi il resto, in fondo cosa non è andato e perché.
         var lines: [ActivityReport.Line] = []
         let total = scene.windows.count
-        lines.append(.init(symbol: "macwindow", text: "\(assignments.count) \(assignments.count == 1 ? "finestra" : "finestre") su \(total) al loro posto"))
+        lines.append(.init(text: assignments.count == total
+            ? "Tutte le \(total) finestre al loro posto"
+            : "\(assignments.count) finestre su \(total) al loro posto"))
         let placedKeys = Set(assignments.map { Engine.windowKey($0.saved) })
+        let reopenedKeys = Set(reopened.map { Engine.windowKey($0) })
         let missing = scene.windows.filter { !placedKeys.contains(Engine.windowKey($0)) }
-        if !missing.isEmpty {
-            let names = missing.map { $0.title.isEmpty ? $0.appName : "\($0.appName) “\($0.title)”" }
-            notes.append(.init(symbol: "exclamationmark.triangle.fill", text: "Non trovate: " + Engine.shortList(names), warning: true))
+        for window in missing.prefix(4) {
+            notes.append(.init(text: missingReason(window, reopened: reopenedKeys.contains(Engine.windowKey(window)), profiles: profiles), warning: true))
+        }
+        if missing.count > 4 {
+            notes.append(.init(text: "Altre \(missing.count - 4) finestre non ritrovate", warning: true))
         }
         let wrongDesktop = assignments.filter { $0.saved.desktop != nil && $0.saved.desktop != $0.tracked.desktop }
-        if !wrongDesktop.isEmpty {
-            notes.append(.init(symbol: "exclamationmark.triangle.fill", text: "Sulla scrivania sbagliata: " + Engine.shortList(wrongDesktop.map(\.saved.appName)), warning: true))
+        for assignment in wrongDesktop.prefix(3) {
+            notes.append(.init(text: "\(windowName(assignment.saved, profiles: profiles)): non sono riuscito a portarla sulla scrivania \(assignment.saved.desktop ?? 0)", warning: true))
         }
         lines += notes.filter { !$0.warning } + notes.filter(\.warning)
         let seconds = max(1, Int(Date().timeIntervalSince(started).rounded()))
         let hasWarnings = lines.contains(where: \.warning)
         onActivity?(ActivityReport(
             kind: hasWarnings ? .warning : .success,
-            title: hasWarnings ? "“\(scene.name)” richiamata, con qualche eccezione" : "“\(scene.name)” è al suo posto",
-            subtitle: "Fatto in \(seconds) \(seconds == 1 ? "secondo" : "secondi")",
+            title: hasWarnings ? "Scena “\(scene.name)” ripristinata in parte" : "Scena “\(scene.name)” ripristinata",
+            subtitle: "Ci ho messo \(seconds) \(seconds == 1 ? "secondo" : "secondi")",
             lines: lines
         ))
+    }
+
+    /// Nome leggibile di una finestra salvata: app e titolo, senza il profilo di Chrome.
+    private func windowName(_ window: SavedWindow, profiles: [ChromeProfile]) -> String {
+        let app = window.bundleID == BrowserBridge.chromeID ? "Chrome" : window.appName
+        var title = window.title
+        if window.bundleID == FinderBridge.bundleID, let path = window.folderPath {
+            title = FinderBridge.displayName(of: path)
+        }
+        title = BrowserBridge.readableTitle(title, profiles: profiles)
+        return title.isEmpty || title == app ? app : "\(app) “\(title)”"
+    }
+
+    /// Perché una finestra della scena non è tornata, in parole semplici.
+    private func missingReason(_ window: SavedWindow, reopened: Bool, profiles: [ChromeProfile]) -> String {
+        let name = windowName(window, profiles: profiles)
+        if BrowserBridge.isBrowser(window.bundleID) {
+            let tabs = window.tabs ?? []
+            if tabs.isEmpty { return "\(name): era chiusa e non so quali schede avesse, quindi non l'ho riaperta" }
+            if tabs.allSatisfy({ BrowserBridge.isMeeting($0) }) { return "\(name): era una riunione finita, non la riapro" }
+        }
+        if window.bundleID == FinderBridge.bundleID, window.folderPath == nil {
+            return "\(name): era chiusa e non so quale cartella mostrasse"
+        }
+        if reopened { return "\(name): l'ho riaperta ma non sono riuscito a metterla al suo posto" }
+        return "\(name): era chiusa e questa app non mi permette di riaprirla"
     }
 
     /// Chiave per riconoscere la stessa finestra salvata.
@@ -772,7 +860,9 @@ final class Engine {
     /// Rimette lo zoom di Chrome dei siti della scena.
     /// I siti con uno zoom diverso dal normale li sistemo sempre: Chrome scrive le preferenze
     /// con qualche secondo di ritardo, quindi quello che leggo può non essere aggiornato.
-    private func applyChromeZoom(_ scene: SavedScene, assignments: [Assignment], displays: [LiveDisplay]) async -> (applied: [String], failed: [String]) {
+    /// Lo zoom di Chrome vale per sito e per profilo: prima di cambiarlo controllo che la finestra
+    /// in primo piano sia del profilo giusto.
+    private func applyChromeZoom(_ scene: SavedScene, displays: [LiveDisplay], profiles: [ChromeProfile]) async -> (applied: [String], failed: [String]) {
         var applied: [String] = []
         var failed: [String] = []
         guard let wanted = scene.chromeZoom,
@@ -783,7 +873,7 @@ final class Engine {
                 let now = current.hosts[host] ?? current.defaultLevel
                 let custom = abs(level - current.defaultLevel) > 0.01
                 guard custom || abs(now - level) > 0.01 else { continue }
-                // La finestra della scena con quel sito, nel profilo giusto: la riconosco dalle sue schede.
+                // La finestra della scena con quel sito, nel profilo giusto.
                 let saved = scene.windows.first { window in
                     window.bundleID == BrowserBridge.chromeID
                         && (window.chromeProfile ?? profile) == profile
@@ -794,28 +884,41 @@ final class Engine {
                         self.targetFrame(for: window, on: $0, scene: scene)
                     }
                 }
-                let previousTab: Int?
-                switch BrowserBridge.focusChromeTab(host: host, tabs: saved?.tabs ?? [], near: frame) {
-                case .noTab:
+                let candidates = BrowserBridge.chromeCandidates(host: host, tabs: saved?.tabs ?? [], near: frame)
+                guard !candidates.isEmpty else {
                     Log.write("Zoom di Chrome su \(host): nessuna scheda aperta con questo sito")
                     continue
-                case .failed:
-                    Log.write("Zoom di Chrome su \(host): non riesco a mettere in primo piano la scheda")
+                }
+                // Il profilo lo verifico solo se so di quale profilo era la finestra salvata.
+                let checkProfile = profiles.count > 1 && saved?.chromeProfile != nil
+                var focused = false
+                var previousTab: Int?
+                for candidate in candidates.prefix(5) {
+                    guard case .focused(let previous) = BrowserBridge.focusChromeTab(in: candidate, host: host) else { continue }
+                    await Input.pause(0.8)
+                    if checkProfile, let front = BrowserBridge.frontChromeProfile(pid: chrome.processIdentifier, profiles: profiles), front != profile {
+                        Log.write("Zoom di Chrome su \(host): la finestra \"\(candidate.title)\" è del profilo \(front), cerco quella del profilo \(profile)")
+                        if let previous { BrowserBridge.restoreChromeTab(previous) }
+                        continue
+                    }
+                    focused = true
+                    previousTab = previous
+                    break
+                }
+                guard focused else {
+                    Log.write("Zoom di Chrome su \(host): nessuna finestra del profilo \(profile) con questo sito")
                     failed.append(host)
                     continue
-                case .focused(let previous):
-                    previousTab = previous
                 }
-                await Input.pause(0.8)
                 let steps = BrowserBridge.chromeSteps(from: current.defaultLevel, to: level)
                 let done = await ZoomManager.setZoom(pid: chrome.processIdentifier, steps: steps, appName: "Chrome \(host)")
                 if let previousTab {
                     await Input.pause(0.2)
                     BrowserBridge.restoreChromeTab(previousTab)
                 }
-                Log.write("Zoom di Chrome su \(host) (profilo \(profile)): da \(Int(pow(1.2, now) * 100))% a \(Int(pow(1.2, level) * 100))% \(done ? "applicato" : "NON applicato")")
+                Log.write("Zoom di Chrome su \(host) (profilo \(profile)): da \(Engine.percent(now))% a \(Engine.percent(level))% \(done ? "applicato" : "NON applicato")")
                 if done {
-                    applied.append("\(host) \(Int((pow(1.2, level) * 100).rounded()))%")
+                    applied.append("\(host) al \(Engine.percent(level))%")
                 } else {
                     failed.append(host)
                 }
@@ -896,12 +999,15 @@ final class Engine {
             FinderBridge.open(folder: path)
             return true
         }
-        if saved.bundleID == BrowserBridge.chromeID {
-            BrowserBridge.openChromeWindow(profile: saved.chromeProfile, urls: saved.tabs ?? [])
-            return true
-        }
-        if saved.bundleID == BrowserBridge.safariID, let tabs = saved.tabs, !tabs.isEmpty {
-            BrowserBridge.openSafariWindow(urls: tabs)
+        if BrowserBridge.isBrowser(saved.bundleID) {
+            // Senza schede note aprirei una finestra vuota; le riunioni finite non le riapro.
+            let tabs = (saved.tabs ?? []).filter { !BrowserBridge.isMeeting($0) }
+            guard !tabs.isEmpty else { return false }
+            if saved.bundleID == BrowserBridge.chromeID {
+                BrowserBridge.openChromeWindow(profile: saved.chromeProfile, urls: tabs)
+            } else {
+                BrowserBridge.openSafariWindow(urls: tabs)
+            }
             return true
         }
         if let raw = saved.documentURL, let url = URL(string: raw), url.isFileURL,
@@ -1077,6 +1183,7 @@ final class Engine {
         lines.append("Ormeggio \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?")")
         lines.append("macOS: \(ProcessInfo.processInfo.operatingSystemVersionString)")
         lines.append("Accessibilità: \(WindowManager.isTrusted(prompt: false) ? "concessa" : "NON concessa")")
+        lines.append("Automazione Chrome: \(BrowserBridge.automationStatus(bundleID: BrowserBridge.chromeID)) · Finder: \(BrowserBridge.automationStatus(bundleID: FinderBridge.bundleID))")
         lines.append("Lettura scrivanie: \(SpacesManager.isAvailable ? "disponibile" : "non disponibile")")
         lines.append("Scorciatoie ctrl + frecce: \(Engine.desktopShortcutsEnabled ? "attive" : "DISATTIVATE")")
         lines.append("Impronta monitor: \(DisplayManager.fingerprint(displays))")
