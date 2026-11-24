@@ -73,30 +73,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func updateIcon() {
         guard let button = statusItem?.button else { return }
-        let symbol: String
         let tooltip: String
         switch engine.state {
         case .active(let name):
-            symbol = "macwindow.on.rectangle"
             tooltip = "Ormeggio: scena \(name)"
         case .idle:
-            symbol = "macwindow"
             tooltip = "Ormeggio"
         case .working:
-            symbol = "arrow.triangle.2.circlepath"
             tooltip = "Ormeggio sta sistemando le finestre: non toccare mouse e tastiera"
         case .needsPermission:
-            symbol = "exclamationmark.triangle"
             tooltip = "Ormeggio: serve il permesso di Accessibilità"
         }
-        if let image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Ormeggio") {
+        if let image = Bundle.main.image(forResource: "MenuIcon") {
             image.isTemplate = true
+            image.size = NSSize(width: 18, height: 18)
             button.image = image
-            button.title = ""
+            button.title = engine.state == .needsPermission ? "!" : ""
+            button.imagePosition = .imageLeft
         } else {
             button.image = nil
             button.title = "⚓︎"
         }
+        // Mentre lavora l'ancora diventa grigia.
+        button.appearsDisabled = engine.state == .working
         button.toolTip = tooltip
     }
 

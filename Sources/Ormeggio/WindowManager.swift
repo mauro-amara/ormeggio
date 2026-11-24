@@ -11,6 +11,17 @@ struct LiveWindow {
     let frame: CGRect
     let windowID: CGWindowID?
     let documentURL: String?
+    let isMinimized: Bool
+    let isFullScreen: Bool
+}
+
+/// Una finestra vista dal server delle finestre di macOS, su qualsiasi scrivania.
+struct SystemWindow {
+    let id: CGWindowID
+    let pid: pid_t
+    let bounds: CGRect
+    let name: String?
+    let alpha: Double
 }
 
 @MainActor
@@ -29,17 +40,20 @@ enum WindowManager {
         }
     }
 
-    /// Finestre standard, non ridotte a icona, di un'app.
-    static func windows(of app: NSRunningApplication) -> [LiveWindow] {
-        guard let bundleID = app.bundleIdentifier else { return [] }
+    private static func axWindows(of app: NSRunningApplication) -> [AXUIElement] {
         let axApp = AXUIElementCreateApplication(app.processIdentifier)
         _ = AXUIElementSetMessagingTimeout(axApp, 1.0)
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &value) == .success,
               let elements = value as? [AXUIElement] else { return [] }
-        return elements.compactMap { element -> LiveWindow? in
+        return elements
+    }
+
+    /// Finestre standard di un'app, comprese quelle ridotte nel Dock.
+    static func windows(of app: NSRunningApplication) -> [LiveWindow] {
+        guard let bundleID = app.bundleIdentifier else { return [] }
+        return axWindows(of: app).compactMap { element -> LiveWindow? in
             guard stringAttribute(element, kAXSubroleAttribute) == kAXStandardWindowSubrole else { return nil }
-            if boolAttribute(element, kAXMinimizedAttribute) == true { return nil }
             guard let rect = frame(of: element) else { return nil }
             return LiveWindow(
                 element: element,
@@ -49,9 +63,51 @@ enum WindowManager {
                 title: stringAttribute(element, kAXTitleAttribute) ?? "",
                 frame: rect,
                 windowID: windowID(of: element),
-                documentURL: stringAttribute(element, kAXDocumentAttribute)
+                documentURL: stringAttribute(element, kAXDocumentAttribute),
+                isMinimized: boolAttribute(element, kAXMinimizedAttribute) == true,
+                isFullScreen: boolAttribute(element, "AXFullScreen") == true
             )
         }
+    }
+
+    /// Identificativi di tutte le finestre che l'app espone, anche pannelli e dialoghi.
+    static func allWindowIDs(of app: NSRunningApplication) -> Set<CGWindowID> {
+        Set(axWindows(of: app).compactMap { windowID(of: $0) })
+    }
+
+    /// Tutte le finestre normali di tutte le scrivanie, dalla più in primo piano. Non sposta niente.
+    static func systemWindows() -> [SystemWindow] {
+        guard let list = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
+            return []
+        }
+        return list.compactMap { entry -> SystemWindow? in
+            guard (entry[kCGWindowLayer as String] as? NSNumber)?.intValue == 0,
+                  let id = (entry[kCGWindowNumber as String] as? NSNumber)?.uint32Value,
+                  let pid = (entry[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value,
+                  let boundsDictionary = entry[kCGWindowBounds as String] as? NSDictionary,
+                  let bounds = CGRect(dictionaryRepresentation: boundsDictionary as CFDictionary) else { return nil }
+            return SystemWindow(
+                id: id,
+                pid: pid,
+                bounds: bounds,
+                name: entry[kCGWindowName as String] as? String,
+                alpha: (entry[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 1
+            )
+        }
+    }
+
+    /// Ritrova la finestra con l'Accessibilità a partire dal suo identificativo.
+    static func resolve(windowID: CGWindowID, pid: pid_t) -> LiveWindow? {
+        guard let app = NSRunningApplication(processIdentifier: pid) else { return nil }
+        return windows(of: app).first { $0.windowID == windowID }
+    }
+
+    static func setMinimized(_ element: AXUIElement, _ minimized: Bool) {
+        _ = AXUIElementSetAttributeValue(element, kAXMinimizedAttribute as CFString, minimized ? kCFBooleanTrue : kCFBooleanFalse)
+    }
+
+    static func setFullScreen(_ element: AXUIElement, _ fullScreen: Bool) {
+        _ = AXUIElementSetAttributeValue(element, "AXFullScreen" as CFString, fullScreen ? kCFBooleanTrue : kCFBooleanFalse)
     }
 
     // MARK: Identificativo della finestra

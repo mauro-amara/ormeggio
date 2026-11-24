@@ -62,14 +62,14 @@ enum BrowserBridge {
         }
     }
 
-    /// Abbina una finestra vista con l'Accessibilità a quella letta con AppleScript.
-    static func match(_ window: LiveWindow, in infos: [BrowserWindowInfo]) -> Int? {
+    /// Abbina una finestra (titolo e posizione) a quella letta con AppleScript.
+    static func match(title: String, frame: CGRect, in infos: [BrowserWindowInfo]) -> Int? {
         guard !infos.isEmpty else { return nil }
         func gap(_ info: BrowserWindowInfo) -> CGFloat {
-            abs(info.frame.minX - window.frame.minX) + abs(info.frame.minY - window.frame.minY)
-                + abs(info.frame.width - window.frame.width) + abs(info.frame.height - window.frame.height)
+            abs(info.frame.minX - frame.minX) + abs(info.frame.minY - frame.minY)
+                + abs(info.frame.width - frame.width) + abs(info.frame.height - frame.height)
         }
-        let sameTitle = infos.indices.filter { infos[$0].title == window.title }
+        let sameTitle = infos.indices.filter { !title.isEmpty && infos[$0].title == title }
         if let best = sameTitle.min(by: { gap(infos[$0]) < gap(infos[$1]) }) { return best }
         guard let best = infos.indices.min(by: { gap(infos[$0]) < gap(infos[$1]) }) else { return nil }
         return gap(infos[best]) < 80 ? best : nil

@@ -72,6 +72,10 @@ struct SavedWindow: Codable {
     var tabs: [String]?
     /// Cartella del profilo Chrome (per esempio "Default" o "Profile 1").
     var chromeProfile: String?
+    /// Ridotta nel Dock al momento del salvataggio.
+    var minimized: Bool?
+    /// A tutto schermo al momento del salvataggio.
+    var fullScreen: Bool?
 }
 
 /// Una scena: tutto quello che serve per rimettere il Mac com'era.

@@ -7,19 +7,30 @@ enum EngineState: Equatable {
     case needsPermission
 }
 
-/// Una finestra trovata durante il giro delle scrivanie.
+/// Una finestra aperta, su qualsiasi scrivania.
 struct TrackedWindow {
-    let live: LiveWindow
+    let windowID: CGWindowID?
+    let pid: pid_t
+    let bundleID: String
+    let appName: String
+    var title: String
+    var frame: CGRect
+    /// Elemento di Accessibilità: c'è se macOS lo espone (di solito per le scrivanie visibili).
+    var live: LiveWindow?
     var displayKey: String
     /// Scrivania del monitor (da 1). Nil se è su tutte le scrivanie o non si sa.
     var desktop: Int?
     var chromeProfile: String?
+    var isMinimized: Bool
+    var isFullScreen: Bool
 }
 
 /// Una finestra salvata abbinata alla finestra aperta che la rappresenta.
 struct Assignment {
     let saved: SavedWindow
     var tracked: TrackedWindow
+    /// La finestra è stata spostata o ha cambiato stato: va riposizionata.
+    var needsFrame = false
 }
 
 /// Salva e richiama le scene.
@@ -145,21 +156,15 @@ final class Engine {
     }
 
     private func placeLaunchedApp(_ bundleID: String, scene: SavedScene) async {
-        guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first else { return }
         let displays = DisplayManager.activeDisplays()
-        let layouts = SpacesManager.layouts(for: displays)
-        let tracked = WindowManager.windows(of: app).compactMap { window -> TrackedWindow? in
-            guard let display = Engine.display(for: window.frame, in: displays) else { return nil }
-            let desktop = layouts[display.id]?.currentIndex.map { $0 + 1 }
-            return TrackedWindow(live: window, displayKey: display.key, desktop: desktop, chromeProfile: nil)
-        }
+        let tracked = inventory(displays: displays, profiles: []).filter { $0.bundleID == bundleID }
         let result = match(scene.windows.filter { $0.bundleID == bundleID }, with: tracked)
         guard !result.assignments.isEmpty else { return }
         isBusy = true
         refreshState()
         var assignments = result.assignments
         await relocate(&assignments, scene: scene, displays: displays)
-        await placeFrames(assignments, scene: scene, displays: displays)
+        await placeFrames(&assignments, scene: scene, displays: displays)
         isBusy = false
         refreshState()
     }
@@ -174,14 +179,15 @@ final class Engine {
         }
         isBusy = true
         refreshState()
-        var scene = await capture(name: name)
+        var scene = capture(name: name)
         scene.autoApply = autoApply
         store.save(scene)
         activeSceneID = store.scene(named: name)?.id
         lastFingerprint = scene.fingerprint
         isBusy = false
         refreshState()
-        Log.write("Scena \"\(name)\" salvata: \(scene.windows.count) finestre, \(scene.apps.count) app")
+        Log.write("Scena \"\(name)\" salvata: \(scene.windows.count) finestre, \(scene.apps.count) app. "
+                  + scene.windows.map { "\($0.appName) [\($0.displayKey) scrivania \($0.desktop.map { "\($0)" } ?? "?")]" }.joined(separator: ", "))
     }
 
     func deleteScene(id: UUID) {
@@ -201,10 +207,10 @@ final class Engine {
         store.update(id: id) { $0.autoApply = enabled }
     }
 
-    private func capture(name: String) async -> SavedScene {
+    /// Fotografa lo stato del Mac. Legge le finestre di tutte le scrivanie senza spostarsi.
+    private func capture(name: String) -> SavedScene {
         let displays = DisplayManager.activeDisplays()
         let layouts = SpacesManager.layouts(for: displays)
-        let mouse = Input.mouseLocation
 
         let running = WindowManager.regularApps()
         let runningIDs = Set(running.compactMap(\.bundleIdentifier))
@@ -213,8 +219,15 @@ final class Engine {
         var safariInfos = runningIDs.contains(BrowserBridge.safariID) ? BrowserBridge.windows(bundleID: BrowserBridge.safariID) : []
         let profiles = runningIDs.contains(BrowserBridge.chromeID) ? BrowserBridge.chromeProfiles() : []
 
-        let tracked = await inventory(displays: displays, profiles: profiles, visitAllDesktops: manageSpaces)
-        Input.moveMouse(to: mouse)
+        // Profili di Chrome già noti dalle scene salvate, per le finestre ancora aperte.
+        var knownProfiles: [CGWindowID: String] = [:]
+        for scene in store.scenes {
+            for window in scene.windows {
+                if let id = window.windowID, let profile = window.chromeProfile { knownProfiles[id] = profile }
+            }
+        }
+
+        let tracked = inventory(displays: displays, profiles: profiles, knownProfiles: knownProfiles)
 
         let savedDisplays = displays.map { display in
             DisplayInfo(
@@ -232,40 +245,47 @@ final class Engine {
         var counters: [String: Int] = [:]
         var windows: [SavedWindow] = []
         for item in tracked {
-            let window = item.live
             guard let display = displays.first(where: { $0.key == item.displayKey }) else { continue }
             let relative = CGRect(
-                x: window.frame.minX - display.bounds.minX,
-                y: window.frame.minY - display.bounds.minY,
-                width: window.frame.width,
-                height: window.frame.height
+                x: item.frame.minX - display.bounds.minX,
+                y: item.frame.minY - display.bounds.minY,
+                width: item.frame.width,
+                height: item.frame.height
             )
-            let index = counters[window.bundleID, default: 0]
-            counters[window.bundleID] = index + 1
+            let index = counters[item.bundleID, default: 0]
+            counters[item.bundleID] = index + 1
             var saved = SavedWindow(
-                bundleID: window.bundleID,
-                appName: window.appName,
-                title: window.title,
+                bundleID: item.bundleID,
+                appName: item.appName,
+                title: item.title,
                 index: index,
                 displayKey: display.key,
                 frame: CodableRect(relative),
                 desktop: item.desktop,
-                windowID: window.windowID,
-                documentURL: window.documentURL,
-                chromeProfile: item.chromeProfile
+                windowID: item.windowID,
+                documentURL: item.live?.documentURL,
+                chromeProfile: item.chromeProfile,
+                minimized: item.isMinimized ? true : nil,
+                fullScreen: item.isFullScreen ? true : nil
             )
-            switch window.bundleID {
+            switch item.bundleID {
             case FinderBridge.bundleID:
-                if let match = Engine.folderIndex(for: window, in: unusedFolders) {
-                    saved.folderPath = unusedFolders.remove(at: match).path
+                if let match = Engine.folderIndex(title: item.title, frame: item.frame, in: unusedFolders) {
+                    let folder = unusedFolders.remove(at: match)
+                    saved.folderPath = folder.path
+                    if saved.title.isEmpty { saved.title = FinderBridge.displayName(of: folder.path) }
                 }
             case BrowserBridge.chromeID:
-                if let match = BrowserBridge.match(window, in: chromeInfos) {
-                    saved.tabs = chromeInfos.remove(at: match).urls
+                if let match = BrowserBridge.match(title: item.title, frame: item.frame, in: chromeInfos) {
+                    let info = chromeInfos.remove(at: match)
+                    saved.tabs = info.urls
+                    if saved.title.isEmpty { saved.title = info.title }
                 }
             case BrowserBridge.safariID:
-                if let match = BrowserBridge.match(window, in: safariInfos) {
-                    saved.tabs = safariInfos.remove(at: match).urls
+                if let match = BrowserBridge.match(title: item.title, frame: item.frame, in: safariInfos) {
+                    let info = safariInfos.remove(at: match)
+                    saved.tabs = info.urls
+                    if saved.title.isEmpty { saved.title = info.title }
                 }
             default:
                 break
@@ -303,53 +323,90 @@ final class Engine {
         )
     }
 
-    // MARK: Giro delle scrivanie
+    // MARK: Dove sono le finestre
 
-    /// Trova le finestre aperte e su quale monitor e scrivania si trovano.
-    /// Con visitAllDesktops passa da tutte le scrivanie, perché macOS mostra solo le finestre di quelle visibili.
-    private func inventory(displays: [LiveDisplay], profiles: [ChromeProfile], visitAllDesktops: Bool,
-                           excluding: Set<CGWindowID> = []) async -> [TrackedWindow] {
-        var result: [TrackedWindow] = []
-        var seen = excluding
-        let initial = SpacesManager.layouts(for: displays)
-
-        func collect(only displayKey: String?, assumedDesktop: (LiveDisplay) -> Int?) {
-            let layouts = SpacesManager.layouts(for: displays)
-            for app in WindowManager.regularApps() {
-                for window in WindowManager.windows(of: app) {
-                    if let id = window.windowID, seen.contains(id) { continue }
-                    guard let display = Engine.display(for: window.frame, in: displays) else { continue }
-                    if let displayKey, display.key != displayKey { continue }
-                    var desktop = assumedDesktop(display)
-                    if let id = window.windowID {
-                        seen.insert(id)
-                        let spaces = SpacesManager.spaceIDs(forWindow: id)
-                        if spaces.count > 1 {
-                            desktop = nil
-                        } else if let space = spaces.first, let index = layouts[display.id]?.spaceIDs.firstIndex(of: space) {
-                            desktop = index + 1
-                        }
-                    }
-                    var profile: String?
-                    if window.bundleID == BrowserBridge.chromeID, !profiles.isEmpty {
-                        profile = BrowserBridge.detectProfile(of: window, profiles: profiles)
-                    }
-                    result.append(TrackedWindow(live: window, displayKey: display.key, desktop: desktop, chromeProfile: profile))
-                }
+    /// Trova le finestre aperte e su quale monitor e scrivania si trovano, senza cambiare scrivania.
+    /// Le posizioni vengono dal server delle finestre di macOS; titoli ed elementi di Accessibilità
+    /// si aggiungono per le finestre che macOS espone.
+    private func inventory(displays: [LiveDisplay], profiles: [ChromeProfile],
+                           knownProfiles: [CGWindowID: String] = [:],
+                           excluding: Set<CGWindowID> = []) -> [TrackedWindow] {
+        let layouts = SpacesManager.layouts(for: displays)
+        let userSpaces = Set(layouts.values.flatMap(\.spaceIDs))
+        var appsByPID: [pid_t: NSRunningApplication] = [:]
+        var liveByID: [CGWindowID: LiveWindow] = [:]
+        var liveWithoutID: [LiveWindow] = []
+        var exposedIDs = Set<CGWindowID>()
+        for app in WindowManager.regularApps() {
+            appsByPID[app.processIdentifier] = app
+            exposedIDs.formUnion(WindowManager.allWindowIDs(of: app))
+            for window in WindowManager.windows(of: app) {
+                if let id = window.windowID { liveByID[id] = window } else { liveWithoutID.append(window) }
             }
         }
 
-        collect(only: nil) { initial[$0.id]?.currentIndex.map { $0 + 1 } }
-        guard visitAllDesktops, SpacesManager.isAvailable else { return result }
+        var result: [TrackedWindow] = []
+        var seen = excluding
 
-        for display in displays {
-            guard let layout = initial[display.id], layout.count > 1, let current = layout.currentIndex else { continue }
-            for index in layout.spaceIDs.indices where index != current {
-                guard await SpacesManager.switchDesktop(on: display, to: index, displays: displays) else { continue }
-                await Input.pause(0.25)
-                collect(only: display.key) { _ in index + 1 }
+        func add(id: CGWindowID?, app: NSRunningApplication, live: LiveWindow?, frame: CGRect, title: String, spaces: [Int]) {
+            guard let bundleID = app.bundleIdentifier,
+                  let display = Engine.display(for: frame, in: displays) else { return }
+            var desktop: Int?
+            if spaces.count == 1, let index = layouts[display.id]?.spaceIDs.firstIndex(of: spaces[0]) {
+                desktop = index + 1
+            } else if spaces.isEmpty, live?.isMinimized != true {
+                desktop = layouts[display.id]?.currentIndex.map { $0 + 1 }
             }
-            await SpacesManager.switchDesktop(on: display, to: current, displays: displays)
+            var profile: String?
+            if bundleID == BrowserBridge.chromeID {
+                if let id, let known = knownProfiles[id] {
+                    profile = known
+                } else if let live, !profiles.isEmpty {
+                    profile = BrowserBridge.detectProfile(of: live, profiles: profiles)
+                }
+            }
+            result.append(TrackedWindow(
+                windowID: id,
+                pid: app.processIdentifier,
+                bundleID: bundleID,
+                appName: app.localizedName ?? bundleID,
+                title: title,
+                frame: frame,
+                live: live,
+                displayKey: display.key,
+                desktop: desktop,
+                chromeProfile: profile,
+                isMinimized: live?.isMinimized ?? false,
+                isFullScreen: live?.isFullScreen ?? false
+            ))
+        }
+
+        // 1. Tutte le finestre di tutte le scrivanie, dalla più in primo piano.
+        for system in WindowManager.systemWindows() {
+            guard !seen.contains(system.id), let app = appsByPID[system.pid] else { continue }
+            let spaces = SpacesManager.spaceIDs(forWindow: system.id)
+            if let live = liveByID[system.id] {
+                seen.insert(system.id)
+                add(id: system.id, app: app, live: live, frame: live.frame, title: live.title, spaces: spaces)
+            } else {
+                // Finestre che l'Accessibilità non mostra, di solito perché sono su un'altra scrivania.
+                // Tengo solo quelle normali: su una sola scrivania, visibili e non minuscole.
+                guard !exposedIDs.contains(system.id), spaces.count == 1, userSpaces.contains(spaces[0]),
+                      system.alpha > 0, system.bounds.width >= 120, system.bounds.height >= 90 else { continue }
+                seen.insert(system.id)
+                add(id: system.id, app: app, live: nil, frame: system.bounds, title: system.name ?? "", spaces: spaces)
+            }
+        }
+
+        // 2. Finestre dell'Accessibilità rimaste fuori (per esempio ridotte nel Dock).
+        for (id, live) in liveByID where !seen.contains(id) {
+            guard let app = appsByPID[live.pid] else { continue }
+            seen.insert(id)
+            add(id: id, app: app, live: live, frame: live.frame, title: live.title, spaces: SpacesManager.spaceIDs(forWindow: id))
+        }
+        for live in liveWithoutID {
+            guard let app = appsByPID[live.pid] else { continue }
+            add(id: nil, app: app, live: live, frame: live.frame, title: live.title, spaces: [])
         }
         return result
     }
@@ -377,8 +434,19 @@ final class Engine {
         var displays = DisplayManager.activeDisplays()
         var modeChanged = false
         for saved in scene.displays {
-            guard let target = saved.mode, let live = displays.first(where: { $0.key == saved.key }) else { continue }
-            if DisplayManager.setMode(target, on: live.id) { modeChanged = true }
+            guard let target = saved.mode else { continue }
+            guard let live = displays.first(where: { $0.key == saved.key }) else {
+                Log.write("Scala: \(saved.name) non è collegato")
+                continue
+            }
+            let current = live.mode?.label ?? "?"
+            if let mode = live.mode, mode.sameResolution(as: target) {
+                Log.write("Scala di \(live.name): già \(current)")
+                continue
+            }
+            let changed = DisplayManager.setMode(target, on: live.id)
+            Log.write("Scala di \(live.name): da \(current) a \(target.label) \(changed ? "cambiata" : "NON cambiata")")
+            if changed { modeChanged = true }
         }
         if modeChanged {
             await Input.pause(2)
@@ -397,10 +465,15 @@ final class Engine {
             }
         }
 
-        // 3. App chiuse
-        let running = Set(WindowManager.regularApps().compactMap(\.bundleIdentifier))
+        // 3. App chiuse da aprire e app nascoste da mostrare
+        let wantedApps = Set(scene.windows.map(\.bundleID))
+        let running = WindowManager.regularApps()
+        for app in running where app.isHidden {
+            if let bundleID = app.bundleIdentifier, wantedApps.contains(bundleID) { _ = app.unhide() }
+        }
+        let runningIDs = Set(running.compactMap(\.bundleIdentifier))
         var launched = 0
-        for app in scene.apps where !running.contains(app.bundleID) {
+        for app in scene.apps where !runningIDs.contains(app.bundleID) {
             guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: app.bundleID) else {
                 Log.write("App non trovata: \(app.name)")
                 continue
@@ -416,27 +489,55 @@ final class Engine {
         }
         if launched > 0 { await Input.pause(4) }
 
-        // 4. Dove sono adesso le finestre
+        // 4. Dove sono adesso le finestre (senza cambiare scrivania)
         let usesChrome = scene.windows.contains { $0.bundleID == BrowserBridge.chromeID }
         let profiles = usesChrome ? BrowserBridge.chromeProfiles() : []
-        let tracked = await inventory(displays: displays, profiles: profiles, visitAllDesktops: manageSpaces)
+        var knownProfiles: [CGWindowID: String] = [:]
+        for window in scene.windows {
+            if let id = window.windowID, let profile = window.chromeProfile { knownProfiles[id] = profile }
+        }
+        let tracked = inventory(displays: displays, profiles: profiles, knownProfiles: knownProfiles)
         Log.write("Finestre trovate: \(tracked.count). " + Engine.describe(tracked))
 
         // 5. Abbinamento tra finestre salvate e finestre aperte
         let first = match(scene.windows, with: tracked)
         var assignments = first.assignments
-        Log.write("Abbinate \(assignments.count) finestre su \(scene.windows.count). Da riaprire: \(first.unmatched.map { "\($0.appName) \"\($0.title)\"" }.joined(separator: ", "))")
+        Log.write("Abbinate \(assignments.count) finestre su \(scene.windows.count). Da riaprire: "
+                  + first.unmatched.map { "\($0.appName) \"\($0.title)\"" }.joined(separator: ", "))
 
         // 6. Finestre da riaprire: cartelle, documenti, finestre del browser con le schede
         let reopened = first.unmatched.filter { reopen($0) }
         if !reopened.isEmpty {
             await Input.pause(3)
-            let known = Set(tracked.compactMap { $0.live.windowID })
-            let fresh = await inventory(displays: displays, profiles: profiles, visitAllDesktops: false, excluding: known)
-            assignments += match(reopened, with: fresh).assignments
+            let known = Set(tracked.compactMap(\.windowID))
+            let fresh = inventory(displays: displays, profiles: profiles, excluding: known)
+            var more = match(reopened, with: fresh).assignments
+            for index in more.indices { more[index].needsFrame = true }
+            assignments += more
         }
 
-        // 7. Monitor e scrivania giusti
+        // 7. Finestre ridotte nel Dock o a tutto schermo che nella scena non lo erano
+        var stateChanged = false
+        for index in assignments.indices {
+            let assignment = assignments[index]
+            guard let live = assignment.tracked.live else { continue }
+            if assignment.tracked.isMinimized, assignment.saved.minimized != true {
+                WindowManager.setMinimized(live.element, false)
+                assignments[index].needsFrame = true
+                stateChanged = true
+            }
+            if assignment.tracked.isFullScreen, assignment.saved.fullScreen != true {
+                WindowManager.setFullScreen(live.element, false)
+                assignments[index].needsFrame = true
+                stateChanged = true
+            }
+        }
+        if stateChanged {
+            await Input.pause(1.2)
+            refresh(&assignments, displays: displays)
+        }
+
+        // 8. Monitor e scrivania giusti
         await relocate(&assignments, scene: scene, displays: displays)
         let misplaced = assignments.filter { $0.saved.desktop != nil && $0.saved.desktop != $0.tracked.desktop }
         if !misplaced.isEmpty {
@@ -445,18 +546,29 @@ final class Engine {
             }.joined(separator: ", "))
         }
 
-        // 8. Posizione e dimensione
-        await placeFrames(assignments, scene: scene, displays: displays)
+        // 9. Posizione e dimensione
+        await placeFrames(&assignments, scene: scene, displays: displays)
 
-        // 9. Pagina giusta di Impostazioni di Sistema
+        // 10. Pagina giusta di Impostazioni di Sistema
         for assignment in assignments where assignment.saved.bundleID == Engine.settingsID {
             let title = assignment.saved.title
-            if !title.isEmpty, assignment.tracked.live.title != title {
-                WindowManager.selectSidebarItem(titled: title, in: assignment.tracked.live.element)
+            if !title.isEmpty, assignment.tracked.title != title, let live = assignment.tracked.live {
+                WindowManager.selectSidebarItem(titled: title, in: live.element)
             }
         }
 
-        // 10. Scrivanie visibili come al salvataggio
+        // 11. Finestre che nella scena erano ridotte nel Dock o a tutto schermo
+        for assignment in assignments {
+            guard let live = assignment.tracked.live else { continue }
+            if assignment.saved.minimized == true, !assignment.tracked.isMinimized {
+                WindowManager.setMinimized(live.element, true)
+            }
+            if assignment.saved.fullScreen == true, !assignment.tracked.isFullScreen {
+                WindowManager.setFullScreen(live.element, true)
+            }
+        }
+
+        // 12. Scrivanie visibili come al salvataggio
         if manageSpaces {
             for saved in scene.displays {
                 guard let desktop = saved.currentDesktop, let live = displays.first(where: { $0.key == saved.key }) else { continue }
@@ -472,6 +584,20 @@ final class Engine {
         Log.write("Scena \"\(scene.name)\" richiamata: \(assignments.count) finestre sistemate, \(launched) app aperte, \(reopened.count) finestre riaperte")
     }
 
+    /// Aggiorna posizione, monitor e scrivania delle finestre già abbinate.
+    private func refresh(_ assignments: inout [Assignment], displays: [LiveDisplay]) {
+        let current = inventory(displays: displays, profiles: [])
+        var byID: [CGWindowID: TrackedWindow] = [:]
+        for window in current {
+            if let id = window.windowID { byID[id] = window }
+        }
+        for index in assignments.indices {
+            guard let id = assignments[index].tracked.windowID, var fresh = byID[id] else { continue }
+            fresh.chromeProfile = assignments[index].tracked.chromeProfile
+            assignments[index].tracked = fresh
+        }
+    }
+
     // MARK: Abbinamento
 
     /// Abbina per identificativo (stessa finestra ancora aperta), poi per titolo, poi nell'ordine.
@@ -482,7 +608,7 @@ final class Engine {
         var pending: [SavedWindow] = []
         for window in saved {
             if let id = window.windowID,
-               let found = available.firstIndex(where: { $0.live.windowID == id && $0.live.bundleID == window.bundleID }) {
+               let found = available.firstIndex(where: { $0.windowID == id && $0.bundleID == window.bundleID }) {
                 assignments.append(Assignment(saved: window, tracked: available.remove(at: found)))
             } else {
                 pending.append(window)
@@ -493,7 +619,7 @@ final class Engine {
         for window in pending {
             if !window.title.isEmpty,
                let found = available.firstIndex(where: {
-                   $0.live.bundleID == window.bundleID && $0.live.title == window.title && Engine.sameProfile(window, $0)
+                   $0.bundleID == window.bundleID && $0.title == window.title && Engine.sameProfile(window, $0)
                }) {
                 assignments.append(Assignment(saved: window, tracked: available.remove(at: found)))
             } else {
@@ -506,7 +632,7 @@ final class Engine {
             // Cartelle e documenti si riaprono: non li assegno a una finestra qualsiasi della stessa app.
             let reopenable = window.folderPath != nil || window.documentURL != nil
             if !reopenable,
-               let found = available.firstIndex(where: { $0.live.bundleID == window.bundleID && Engine.sameProfile(window, $0) }) {
+               let found = available.firstIndex(where: { $0.bundleID == window.bundleID && Engine.sameProfile(window, $0) }) {
                 assignments.append(Assignment(saved: window, tracked: available.remove(at: found)))
             } else {
                 unmatched.append(window)
@@ -547,20 +673,44 @@ final class Engine {
 
     // MARK: Spostamenti
 
+    /// Restituisce l'elemento di Accessibilità della finestra. Se macOS non lo espone,
+    /// mostra la scrivania della finestra e lo cerca di nuovo.
+    private func liveWindow(for tracked: inout TrackedWindow, displays: [LiveDisplay]) async -> LiveWindow? {
+        if let live = tracked.live { return live }
+        guard let id = tracked.windowID else { return nil }
+        await reveal(tracked, displays: displays)
+        await Input.pause(0.2)
+        if let live = WindowManager.resolve(windowID: id, pid: tracked.pid) {
+            tracked.live = live
+            return live
+        }
+        Log.write("Finestra di \(tracked.appName) non raggiungibile")
+        return nil
+    }
+
     /// Porta ogni finestra sul monitor e sulla scrivania della scena.
     private func relocate(_ assignments: inout [Assignment], scene: SavedScene, displays: [LiveDisplay]) async {
         let fallback = displays.first(where: \.isBuiltin) ?? displays.first
 
-        // Monitor sbagliato: rendo visibile la finestra e la sposto sul monitor giusto.
+        // Monitor sbagliato: sposto la finestra sul monitor giusto.
         for index in assignments.indices {
             let target = displays.first(where: { $0.key == assignments[index].saved.displayKey }) ?? fallback
             guard let target, assignments[index].tracked.displayKey != target.key else { continue }
-            await reveal(assignments[index].tracked, displays: displays)
+            if assignments[index].tracked.live == nil || !isOnVisibleDesktop(assignments[index].tracked, displays: displays) {
+                await reveal(assignments[index].tracked, displays: displays)
+                if let id = assignments[index].tracked.windowID,
+                   let live = WindowManager.resolve(windowID: id, pid: assignments[index].tracked.pid) {
+                    assignments[index].tracked.live = live
+                }
+            }
+            guard let live = assignments[index].tracked.live else { continue }
             let frame = targetFrame(for: assignments[index].saved, on: target, scene: scene)
-            WindowManager.setFrame(assignments[index].tracked.live.element, to: frame)
+            WindowManager.setFrame(live.element, to: frame)
             await Input.pause(0.2)
             assignments[index].tracked.displayKey = target.key
+            assignments[index].tracked.frame = frame
             assignments[index].tracked.desktop = SpacesManager.layouts(for: displays)[target.id]?.currentIndex.map { $0 + 1 }
+            assignments[index].needsFrame = true
         }
 
         // Scrivania sbagliata: trascino la finestra sulla scrivania giusta.
@@ -572,33 +722,76 @@ final class Engine {
             return (left.desktop ?? 0) < (right.desktop ?? 0)
         }
         for index in order {
-            let assignment = assignments[index]
-            guard let wanted = assignment.saved.desktop, let current = assignment.tracked.desktop, wanted != current,
-                  let display = displays.first(where: { $0.key == assignment.tracked.displayKey }),
+            guard let wanted = assignments[index].saved.desktop, let current = assignments[index].tracked.desktop, wanted != current,
+                  let display = displays.first(where: { $0.key == assignments[index].tracked.displayKey }),
                   let layout = SpacesManager.layouts(for: displays)[display.id], wanted <= layout.count else { continue }
             guard await SpacesManager.switchDesktop(on: display, to: current - 1, displays: displays) else { continue }
-            if await SpacesManager.moveWindow(assignment.tracked.live, on: display, to: wanted - 1, displays: displays) {
+            await Input.pause(0.2)
+            // Dopo il cambio di scrivania la finestra è visibile: ne prendo l'elemento aggiornato.
+            if let id = assignments[index].tracked.windowID,
+               let live = WindowManager.resolve(windowID: id, pid: assignments[index].tracked.pid) {
+                assignments[index].tracked.live = live
+            }
+            guard let live = assignments[index].tracked.live else { continue }
+            if await SpacesManager.moveWindow(live, on: display, to: wanted - 1, displays: displays) {
                 assignments[index].tracked.desktop = wanted
+                assignments[index].needsFrame = true
             }
         }
     }
 
-    /// Imposta posizione e dimensione, passando da una scrivania all'altra.
-    private func placeFrames(_ assignments: [Assignment], scene: SavedScene, displays: [LiveDisplay]) async {
+    /// Imposta posizione e dimensione solo dove serve, cambiando scrivania solo se indispensabile.
+    private func placeFrames(_ assignments: inout [Assignment], scene: SavedScene, displays: [LiveDisplay]) async {
         let fallback = displays.first(where: \.isBuiltin) ?? displays.first
-        let groups = Dictionary(grouping: assignments.indices) { index in
+        var targets: [Int: CGRect] = [:]
+        for index in assignments.indices {
+            guard let display = displays.first(where: { $0.key == assignments[index].saved.displayKey }) ?? fallback else { continue }
+            let target = targetFrame(for: assignments[index].saved, on: display, scene: scene)
+            if assignments[index].needsFrame || !Engine.close(assignments[index].tracked.frame, target) {
+                targets[index] = target
+            }
+        }
+        guard !targets.isEmpty else { return }
+
+        // Prima senza cambiare scrivania: per le finestre che macOS espone spesso basta.
+        var pending: [Int] = []
+        for (index, target) in targets {
+            guard let live = assignments[index].tracked.live else {
+                pending.append(index)
+                continue
+            }
+            WindowManager.setFrame(live.element, to: target)
+            if isOnVisibleDesktop(assignments[index].tracked, displays: displays) { continue }
+            pending.append(index)
+        }
+        await Input.pause(0.3)
+
+        // Verifico con il server delle finestre; dove non ha funzionato passo dalla scrivania.
+        let actual = Dictionary(WindowManager.systemWindows().map { ($0.id, $0.bounds) }, uniquingKeysWith: { first, _ in first })
+        let stillWrong = pending.filter { index in
+            guard let id = assignments[index].tracked.windowID, let bounds = actual[id], let target = targets[index] else { return true }
+            return !Engine.close(bounds, target)
+        }
+        let groups = Dictionary(grouping: stillWrong) { index in
             "\(assignments[index].tracked.displayKey)#\(assignments[index].tracked.desktop ?? 0)"
         }
         for key in groups.keys.sorted() {
-            guard let indices = groups[key], let first = indices.first else { continue }
-            if manageSpaces { await reveal(assignments[first].tracked, displays: displays) }
+            guard let indices = groups[key] else { continue }
             for index in indices {
-                let assignment = assignments[index]
-                guard let target = displays.first(where: { $0.key == assignment.saved.displayKey }) ?? fallback else { continue }
-                WindowManager.setFrame(assignment.tracked.live.element, to: targetFrame(for: assignment.saved, on: target, scene: scene))
+                guard let target = targets[index],
+                      let live = await liveWindow(for: &assignments[index].tracked, displays: displays) else { continue }
+                if assignments[index].tracked.live != nil { await reveal(assignments[index].tracked, displays: displays) }
+                WindowManager.setFrame(live.element, to: target)
             }
             await Input.pause(0.2)
         }
+    }
+
+    private func isOnVisibleDesktop(_ tracked: TrackedWindow, displays: [LiveDisplay]) -> Bool {
+        guard let desktop = tracked.desktop,
+              let display = displays.first(where: { $0.key == tracked.displayKey }),
+              let current = SpacesManager.layouts(for: displays)[display.id]?.currentIndex else { return true }
+        return desktop == current + 1
     }
 
     /// Mostra la scrivania su cui si trova la finestra.
@@ -626,6 +819,11 @@ final class Engine {
         return Engine.clamp(target, to: bounds)
     }
 
+    private static func close(_ lhs: CGRect, _ rhs: CGRect) -> Bool {
+        abs(lhs.minX - rhs.minX) < 3 && abs(lhs.minY - rhs.minY) < 3
+            && abs(lhs.width - rhs.width) < 3 && abs(lhs.height - rhs.height) < 3
+    }
+
     // MARK: Diagnostica
 
     func diagnostics() -> String {
@@ -641,7 +839,7 @@ final class Engine {
         for display in displays {
             var line = "• \(display.name) [\(display.key)]"
             if let mode = display.mode {
-                line += " · \(mode.width)×\(mode.height) punti, \(mode.pixelWidth)×\(mode.pixelHeight) pixel"
+                line += " · \(mode.width)×\(mode.height) punti, \(mode.pixelWidth)×\(mode.pixelHeight) pixel, \(Int(mode.refreshRate)) Hz"
             }
             if let layout = layouts[display.id] {
                 line += " · \(layout.count) scrivanie"
@@ -651,13 +849,12 @@ final class Engine {
                 }
             }
             lines.append(line)
+            lines.append("   scale disponibili: " + DisplayManager.availableScales(of: display.id).joined(separator: ", "))
         }
-        let windows = WindowManager.regularApps().flatMap { WindowManager.windows(of: $0) }
-        let withID = windows.filter { $0.windowID != nil }.count
-        lines.append("Finestre visibili: \(windows.count), con identificativo: \(withID)")
-        if let sample = windows.first(where: { $0.windowID != nil }), let id = sample.windowID {
-            lines.append("Scrivania di \"\(sample.appName)\": \(SpacesManager.spaceIDs(forWindow: id))")
-        }
+        let tracked = inventory(displays: displays, profiles: [])
+        let exposed = tracked.filter { $0.live != nil }.count
+        lines.append("Finestre su tutte le scrivanie: \(tracked.count), viste dall'Accessibilità: \(exposed)")
+        lines.append("Finestre per scrivania: " + Engine.describe(tracked))
         let profiles = BrowserBridge.chromeProfiles()
         if !profiles.isEmpty {
             lines.append("Profili Chrome: \(profiles.map { "\($0.name) (\($0.directory))" }.joined(separator: ", "))")
@@ -685,6 +882,8 @@ final class Engine {
                 if let profile = window.chromeProfile { line += " · profilo \(profile)" }
                 if window.folderPath != nil { line += " · cartella" }
                 if window.documentURL != nil { line += " · documento" }
+                if window.minimized == true { line += " · nel Dock" }
+                if window.fullScreen == true { line += " · tutto schermo" }
                 parts.append(line)
             }
         }
@@ -697,9 +896,12 @@ final class Engine {
     }
 
     static func describe(_ tracked: [TrackedWindow]) -> String {
-        let groups = Dictionary(grouping: tracked) { "\($0.displayKey) scrivania \($0.desktop.map { "\($0)" } ?? "tutte")" }
+        let groups = Dictionary(grouping: tracked) { window -> String in
+            let place = window.isMinimized ? "Dock" : "scrivania \(window.desktop.map { "\($0)" } ?? "tutte")"
+            return "\(window.displayKey) \(place)"
+        }
         return groups.keys.sorted().map { key in
-            "[\(key): " + (groups[key] ?? []).map { $0.live.appName }.joined(separator: ", ") + "]"
+            "[\(key): " + (groups[key] ?? []).map { $0.appName }.joined(separator: ", ") + "]"
         }.joined(separator: " ")
     }
 
@@ -754,13 +956,13 @@ final class Engine {
     }
 
     /// Abbina una finestra del Finder alla cartella che mostra (per titolo, poi per posizione).
-    private static func folderIndex(for window: LiveWindow, in folders: [FinderWindowInfo]) -> Int? {
+    private static func folderIndex(title: String, frame: CGRect, in folders: [FinderWindowInfo]) -> Int? {
         guard !folders.isEmpty else { return nil }
         func gap(_ folder: FinderWindowInfo) -> CGFloat {
-            abs(folder.frame.minX - window.frame.minX) + abs(folder.frame.minY - window.frame.minY)
-                + abs(folder.frame.width - window.frame.width) + abs(folder.frame.height - window.frame.height)
+            abs(folder.frame.minX - frame.minX) + abs(folder.frame.minY - frame.minY)
+                + abs(folder.frame.width - frame.width) + abs(folder.frame.height - frame.height)
         }
-        let sameTitle = folders.indices.filter { FinderBridge.displayName(of: folders[$0].path) == window.title }
+        let sameTitle = folders.indices.filter { !title.isEmpty && FinderBridge.displayName(of: folders[$0].path) == title }
         if let best = sameTitle.min(by: { gap(folders[$0]) < gap(folders[$1]) }) { return best }
         guard let best = folders.indices.min(by: { gap(folders[$0]) < gap(folders[$1]) }) else { return nil }
         return gap(folders[best]) < 80 ? best : nil

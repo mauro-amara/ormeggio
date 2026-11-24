@@ -13,6 +13,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/Ormeggio"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+cp Resources/MenuIcon.png Resources/MenuIcon@2x.png "$APP/Contents/Resources/"
 
 # Firma: Developer ID se disponibile (variabile SIGN_IDENTITY), altrimenti firma locale.
 IDENTITY="${SIGN_IDENTITY:--}"
