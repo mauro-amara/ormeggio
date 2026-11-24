@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let updater = Updater()
     private var trustTimer: Timer?
     private var installing = false
+    private var sendingReport = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -27,7 +28,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         engine.onStateChange = { [weak self] in self?.updateIcon() }
         engine.onActivity = { report in HUD.shared.show(report) }
-        HUD.shared.sendDiagnostics = { [weak self] in self?.sendDiagnostics() }
+        HUD.shared.sendDiagnostics = { [weak self] in self?.sendReport() }
+        Notifier.shared.start()
+        Notifier.shared.onOpenUpdate = { [weak self] in self?.showWhatsNew() }
         engine.askChromeProfiles = { [weak self] titles, profiles in
             self?.askChromeProfiles(titles: titles, profiles: profiles) ?? []
         }
@@ -50,7 +53,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: Aggiornamenti
 
-    /// Dopo un aggiornamento: lo dice nel riquadro e, se serve, ripara da solo il permesso di Accessibilità.
+    /// Dopo un aggiornamento: lo dice con una notifica di macOS e nel riquadro,
+    /// e se serve ripara da solo il permesso di Accessibilità.
     private func showUpdateCompleted() {
         let defaults = UserDefaults.standard
         defaults.removeObject(forKey: "updatedFrom")
@@ -59,22 +63,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             defaults.set(updater.currentVersion, forKey: "lastUpdateVersion")
             defaults.removeObject(forKey: "pendingUpdateNotes")
         }
-        guard WindowManager.isTrusted(prompt: false) else {
-            repairPermissionAutomatically()
-            return
-        }
-        // Se la versione di prima non ha lasciato le novità, le leggo dalla pagina degli aggiornamenti.
-        if defaults.string(forKey: "lastUpdateVersion") != updater.currentVersion {
-            Task { @MainActor in
-                if let info = await self.updater.latestPublished(), info.version == self.updater.currentVersion {
-                    defaults.set(info.notes ?? "", forKey: "lastUpdateNotes")
-                    defaults.set(info.version, forKey: "lastUpdateVersion")
-                }
-                self.showWhatsNew()
+        Task { @MainActor in
+            // Se la versione di prima non ha lasciato le novità, le leggo dalla pagina degli aggiornamenti.
+            if defaults.string(forKey: "lastUpdateVersion") != self.updater.currentVersion,
+               let info = await self.updater.latestPublished(), info.version == self.updater.currentVersion {
+                defaults.set(info.notes ?? "", forKey: "lastUpdateNotes")
+                defaults.set(info.version, forKey: "lastUpdateVersion")
             }
-        } else {
-            showWhatsNew()
+            self.notifyUpdate()
+            if WindowManager.isTrusted(prompt: false) {
+                self.showWhatsNew()
+            } else {
+                self.repairPermissionAutomatically()
+            }
         }
+    }
+
+    /// Le novità della versione installata, una per riga. Vuote se non sono di questa versione.
+    private func updateNoteLines() -> [String] {
+        let defaults = UserDefaults.standard
+        guard defaults.string(forKey: "lastUpdateVersion") == updater.currentVersion else { return [] }
+        return (defaults.string(forKey: "lastUpdateNotes") ?? "")
+            .split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+    }
+
+    /// Notifica di macOS: arriva a ogni persona che ha Ormeggio, appena si è aggiornato.
+    private func notifyUpdate() {
+        let lines = updateNoteLines()
+        var body = lines.first ?? "Le tue scene sono al loro posto"
+        if lines.count > 1 { body += "\nClicca per vedere tutte le novità" }
+        Notifier.shared.post(title: "Ormeggio aggiornato alla versione \(updater.currentVersion)", body: body, kind: "update")
     }
 
     /// Le novità dell'ultima versione installata, nel riquadro: una per riga.
@@ -120,7 +140,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 HUD.shared.show(ActivityReport(
                     kind: .failure,
                     title: "Aggiornamento non riuscito",
-                    subtitle: "Riprovo da solo tra un'ora",
+                    subtitle: "Riprovo da solo più tardi",
                     lines: [.init(text: error.localizedDescription, warning: true)]
                 ))
             }
@@ -185,27 +205,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updateIcon()
     }
 
-    /// Indirizzo a cui arrivano le diagnostiche. Claude controlla quella casella ogni ora,
-    /// corregge quello che non va e pubblica la versione nuova, che arriva a tutti da sola.
-    static let feedbackAddress = "mauro.amara@sparkfabrik.com"
-
-    /// Apre in Gmail una mail già pronta con la diagnostica: basta premere Invia.
-    @objc private func sendDiagnostics() {
-        let report = engine.supportReport(maxCharacters: 4500)
-        let subject = "[Ormeggio] Diagnostica \(updater.currentVersion) da \(NSFullUserName())"
-        let body = "Se vuoi, scrivi qui sopra cosa non è andato.\n\n" + report
-        // Codifico tutto tranne lettere e numeri inglesi: "&", "=" e "+" nel testo romperebbero l'indirizzo.
-        let allowed = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
-        func encode(_ text: String) -> String { text.addingPercentEncoding(withAllowedCharacters: allowed) ?? "" }
-        let query = "view=cm&fs=1&to=\(encode(AppDelegate.feedbackAddress))&su=\(encode(subject))&body=\(encode(body))"
-        guard let url = URL(string: "https://mail.google.com/mail/?" + query) else { return }
-        NSWorkspace.shared.open(url)
-        Log.write("Diagnostica preparata in Gmail (\(report.count) caratteri)")
+    /// "Invia segnalazione": un clic e la diagnostica parte da Gmail, senza altro da fare.
+    @objc private func sendReport() {
+        guard !sendingReport, !engine.isWorking else { return }
+        sendingReport = true
         HUD.shared.show(ActivityReport(
-            kind: .success,
-            title: "Mail pronta in Gmail: premi Invia",
-            subtitle: "Claude la riceve, corregge e manda la versione nuova a tutti"
+            kind: .working,
+            title: "Invio la segnalazione…",
+            subtitle: "Si apre Gmail e la mail parte da sola: non toccare la tastiera"
         ))
+        let report = engine.supportReport(maxCharacters: 4500)
+        Task { @MainActor in
+            let outcome = await ReportSender.send(report: report, version: self.updater.currentVersion)
+            self.sendingReport = false
+            switch outcome {
+            case .sent:
+                HUD.shared.show(ActivityReport(
+                    kind: .success,
+                    title: "Segnalazione inviata",
+                    subtitle: "Claude la legge e corregge: la versione nuova arriva da sola, con una notifica"
+                ))
+            case .opened:
+                HUD.shared.show(ActivityReport(
+                    kind: .success,
+                    title: "Segnalazione pronta in Gmail",
+                    subtitle: "Se la mail è ancora aperta, premi Invia",
+                    offersReport: false
+                ))
+            case .noGmail:
+                HUD.shared.show(ActivityReport(
+                    kind: .warning,
+                    title: "Non sono riuscito ad aprire Gmail",
+                    subtitle: "Serve Gmail aperto nel browser con il tuo account",
+                    lines: [.init(text: "Entra in Gmail nel browser e premi di nuovo Invia segnalazione.", tone: .info)],
+                    offersReport: false
+                ))
+            }
+        }
     }
 
     @objc private func copyDiagnostics() {
@@ -372,8 +408,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.addItem(item)
         }
 
-        // Impostazioni
+        // Segnalazioni
         menu.addItem(.separator())
+        let reportItem = commandItem(sendingReport ? "Invio la segnalazione…" : "Invia segnalazione", #selector(sendReport), icon: "exclamationmark.bubble")
+        reportItem.isEnabled = !sendingReport && !engine.isWorking
+        setSubtitle(reportItem, "Un clic: Claude la riceve, corregge e aggiorna Ormeggio")
+        menu.addItem(reportItem)
+
+        // Impostazioni
         let settingsMenu = NSMenu()
         settingsMenu.autoenablesItems = false
         let autoItem = commandItem("Richiamo automatico quando cambiano i monitor", #selector(toggleAutoApply), icon: "bolt.fill")
@@ -386,7 +428,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         loginItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
         settingsMenu.addItem(loginItem)
         settingsMenu.addItem(.separator())
-        settingsMenu.addItem(commandItem("Invia la diagnostica a Claude…", #selector(sendDiagnostics), icon: "paperplane"))
         settingsMenu.addItem(commandItem("Copia la diagnostica", #selector(copyDiagnostics), icon: "doc.on.doc"))
         settingsMenu.addItem(commandItem("Diagnostica…", #selector(showDiagnostics), icon: "stethoscope"))
         settingsMenu.addItem(commandItem("Salva diagnostica per l'assistenza…", #selector(exportReport), icon: "doc.text"))

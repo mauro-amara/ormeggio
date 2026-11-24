@@ -33,6 +33,8 @@ struct ActivityReport {
     /// Pulsante in fondo al riquadro, per la cosa da fare subito.
     var actionTitle: String?
     var action: (@MainActor () -> Void)?
+    /// Se compare il link "Invia segnalazione" quando qualcosa non va.
+    var offersReport = true
 }
 
 /// Il riquadro non è la finestra attiva: senza questo il primo clic su un pulsante andrebbe perso.
@@ -56,7 +58,7 @@ final class HUD {
         self.panel = panel
 
         var send: (@MainActor () -> Void)?
-        if report.kind == .warning || report.kind == .failure, let sendDiagnostics {
+        if report.kind == .warning || report.kind == .failure, report.offersReport, let sendDiagnostics {
             send = sendDiagnostics
         }
         let content = HUDView(report: report, onClose: { [weak self] in self?.hide() }, onSendDiagnostics: send)
@@ -247,7 +249,7 @@ private struct HUDView: View {
                 Button {
                     onSendDiagnostics()
                 } label: {
-                    Label("Invia la diagnostica a Claude", systemImage: "paperplane")
+                    Label("Invia segnalazione", systemImage: "exclamationmark.bubble")
                         .font(.callout)
                 }
                 .buttonStyle(.link)

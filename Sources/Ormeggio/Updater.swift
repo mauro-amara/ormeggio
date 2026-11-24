@@ -47,14 +47,12 @@ final class Updater {
             await Input.pause(10)
             await self.check()
         }
-        timer = Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
+        timer = Timer.scheduledTimer(withTimeInterval: 1800, repeats: true) { [weak self] _ in
             guard let self else { return }
             Task { @MainActor in await self.check() }
         }
     }
 
-    /// Controlla se c'è una versione più recente. Restituisce nil se non c'è o se il controllo fallisce.
-    @discardableResult
     /// L'ultima versione pubblicata, senza installare niente (per leggerne le novità).
     func latestPublished() async -> UpdateInfo? {
         let stamp = Int(Date().timeIntervalSince1970)
@@ -67,6 +65,8 @@ final class Updater {
         return try? JSONDecoder().decode(UpdateInfo.self, from: data)
     }
 
+    /// Controlla se c'è una versione più recente. Restituisce nil se non c'è o se il controllo fallisce.
+    @discardableResult
     func check() async -> UpdateInfo? {
         let stamp = Int(Date().timeIntervalSince1970)
         guard let url = URL(string: Updater.feedBase + "latest.json?t=\(stamp)") else { return nil }

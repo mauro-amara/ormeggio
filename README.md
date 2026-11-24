@@ -54,11 +54,11 @@ Lo zoom di Chrome Ormeggio lo salva da solo, sito per sito e profilo per profilo
 
 ### Aggiornamenti
 
-Quando esce una nuova versione, nel menu di Ormeggio compare **Aggiorna alla versione…**. Premilo: Ormeggio scarica la nuova versione, si chiude, si aggiorna e si riapre da solo. Puoi controllare anche da Impostazioni > **Cerca aggiornamenti…**.
+Ormeggio controlla ogni mezz'ora se c'è una versione nuova e la installa da solo: si chiude, si aggiorna e si riapre. Subito dopo arriva una notifica di macOS a ogni persona che lo usa, con le novità. La prima volta macOS chiede se Ormeggio può mandare notifiche: premi **Consenti**. Le novità si rileggono da Impostazioni > **Novità dell'ultima versione**.
 
 ### Se qualcosa non va
 
-Icona di Ormeggio > Impostazioni > **Salva diagnostica per l'assistenza…**. Crea un file di testo con la diagnostica, l'elenco delle scene e il registro delle ultime operazioni, senza gli indirizzi delle schede. Mandalo a chi ti assiste.
+Icona di Ormeggio > **Invia segnalazione**. Un clic e basta: Ormeggio apre Gmail con la diagnostica già scritta e la spedisce da solo. Claude la riceve, corregge e pubblica la versione nuova, che arriva a tutti con la notifica. La diagnostica contiene il registro delle ultime operazioni e i titoli delle finestre, non gli indirizzi delle schede.
 
 ### Disinstallare
 
