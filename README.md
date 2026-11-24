@@ -54,7 +54,7 @@ Lo zoom di Chrome Ormeggio lo salva da solo, sito per sito e profilo per profilo
 
 ### Aggiornamenti
 
-Ormeggio controlla ogni mezz'ora se c'è una versione nuova e la installa da solo: si chiude, si aggiorna e si riapre. Subito dopo arriva una notifica di macOS a ogni persona che lo usa, con le novità. La prima volta macOS chiede se Ormeggio può mandare notifiche: premi **Consenti**. Le novità si rileggono da Impostazioni > **Novità dell'ultima versione**.
+Ormeggio controlla ogni mezz'ora se c'è una versione nuova e la installa da solo: si chiude, si aggiorna e si riapre. Subito dopo arriva una notifica di macOS a ogni persona che lo usa, con le novità. La prima volta macOS chiede se Ormeggio può mandare notifiche: premi **Consenti**. Dal menu di Ormeggio, sezione Aggiornamenti: **Cerca aggiornamenti** per averla subito e **Novità dell'ultima versione** per rileggere le novità.
 
 ### Se qualcosa non va
 

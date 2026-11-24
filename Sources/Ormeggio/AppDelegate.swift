@@ -443,7 +443,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         setSubtitle(reportItem, "Un clic: Claude la riceve, corregge e aggiorna Ormeggio")
         menu.addItem(reportItem)
 
+        // Aggiornamenti, al primo livello
+        menu.addItem(.separator())
+        menu.addItem(NSMenuItem.sectionHeader(title: "Aggiornamenti"))
+        let checkItem = commandItem("Cerca aggiornamenti", #selector(checkForUpdates), icon: "arrow.triangle.2.circlepath")
+        setSubtitle(checkItem, "Hai la versione \(updater.currentVersion) · si aggiorna anche da sola")
+        menu.addItem(checkItem)
+        if UserDefaults.standard.string(forKey: "lastUpdateNotes")?.isEmpty == false {
+            menu.addItem(commandItem("Novità dell'ultima versione", #selector(showWhatsNewFromMenu), icon: "sparkles"))
+        }
+
         // Impostazioni
+        menu.addItem(.separator())
         let settingsMenu = NSMenu()
         settingsMenu.autoenablesItems = false
         let autoItem = commandItem("Richiamo automatico quando cambiano i monitor", #selector(toggleAutoApply), icon: "bolt.fill")
@@ -463,12 +474,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settingsMenu.addItem(commandItem("Diagnostica…", #selector(showDiagnostics), icon: "stethoscope"))
         settingsMenu.addItem(commandItem("Salva diagnostica per l'assistenza…", #selector(exportReport), icon: "doc.text"))
         settingsMenu.addItem(commandItem("Apri la cartella dei dati", #selector(openDataFolder), icon: "folder"))
-        settingsMenu.addItem(.separator())
-        settingsMenu.addItem(commandItem("Cerca aggiornamenti…", #selector(checkForUpdates), icon: "arrow.triangle.2.circlepath"))
-        if UserDefaults.standard.string(forKey: "lastUpdateNotes")?.isEmpty == false {
-            settingsMenu.addItem(commandItem("Novità dell'ultima versione", #selector(showWhatsNewFromMenu), icon: "sparkles"))
-        }
-        settingsMenu.addItem(infoItem("Versione \(updater.currentVersion)", icon: "info.circle"))
         settingsMenu.addItem(.separator())
         settingsMenu.addItem(commandItem("Disinstalla Ormeggio…", #selector(uninstall), icon: "trash"))
         let settingsItem = NSMenuItem(title: "Impostazioni", action: nil, keyEquivalent: "")
