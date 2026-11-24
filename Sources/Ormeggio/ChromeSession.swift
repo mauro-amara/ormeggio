@@ -91,7 +91,9 @@ enum ChromeSession {
                 guard payload.count >= 8 else { continue }
                 let tab = int32(payload, 0)
                 let limit = int32(payload, 4)
-                tabs[tab]?.navigations = tabs[tab]?.navigations.filter { $0.key < limit } ?? [:]
+                guard var current = tabs[tab] else { continue }
+                current.navigations = current.navigations.filter { $0.key < limit }
+                tabs[tab] = current
             case 6: // una pagina della cronologia della scheda
                 guard let navigation = navigation(payload) else { continue }
                 tabs[navigation.tab, default: Tab()].navigations[navigation.index] = (navigation.url, navigation.title)
