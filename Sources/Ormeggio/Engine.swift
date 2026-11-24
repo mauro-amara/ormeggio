@@ -566,6 +566,14 @@ final class Engine {
                 if change.removed > 0 {
                     notes.append(.init(symbol: "minus.square", text: "\(change.removed) \(change.removed == 1 ? "scrivania tolta" : "scrivanie tolte")"))
                 }
+                let after = SpacesManager.layouts(for: displays)
+                for saved in scene.displays {
+                    guard let count = saved.spaceCount,
+                          let live = displays.first(where: { $0.key == saved.key }),
+                          let have = after[live.id]?.count, have != count else { continue }
+                    notes.append(.init(symbol: "exclamationmark.triangle.fill",
+                                       text: "Scrivanie su \(live.name): \(have) invece di \(count)", warning: true))
+                }
             }
         }
 

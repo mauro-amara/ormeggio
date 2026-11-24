@@ -159,40 +159,82 @@ enum SpacesManager {
     // MARK: Aggiungere e togliere scrivanie (Mission Control)
 
     /// Porta ogni monitor al numero di scrivanie richiesto. Toglie scrivanie solo dalla fine
-    /// e solo se sul monitor non ci sono app a tutto schermo.
+    /// e solo se sul monitor non ci sono app a tutto schermo. Controlla il risultato e riprova una volta.
     static func adjustSpaces(wanted: [CGDirectDisplayID: Int], displays: [LiveDisplay]) async -> (added: Int, removed: Int) {
-        let current = layouts(for: displays)
-        var toAdd: [CGDirectDisplayID: Int] = [:]
-        var toRemove: [CGDirectDisplayID: Int] = [:]
-        for (id, count) in wanted where count > 0 {
-            guard let have = current[id]?.count else { continue }
-            if count > have { toAdd[id] = count - have }
-            if count < have { toRemove[id] = have - count }
+        var added = 0
+        var removed = 0
+        for attempt in 1...2 {
+            let current = layouts(for: displays)
+            var toAdd: [CGDirectDisplayID: Int] = [:]
+            var toRemove: [CGDirectDisplayID: Int] = [:]
+            for (id, count) in wanted where count > 0 {
+                guard let have = current[id]?.count else { continue }
+                if count > have { toAdd[id] = count - have }
+                if count < have { toRemove[id] = have - count }
+            }
+            guard !toAdd.isEmpty || !toRemove.isEmpty else { break }
+            Log.write("Scrivanie, tentativo \(attempt): da aggiungere \(describe(toAdd, displays)), da togliere \(describe(toRemove, displays))")
+            let result = await missionControlPass(toAdd: toAdd, toRemove: toRemove, current: current, displays: displays)
+            added += result.added
+            removed += result.removed
+            await Input.pause(0.6)
         }
-        guard !toAdd.isEmpty || !toRemove.isEmpty else { return (0, 0) }
+        let after = layouts(for: displays)
+        for display in displays {
+            guard let count = wanted[display.id], count > 0, let have = after[display.id]?.count else { continue }
+            if have != count { Log.write("Scrivanie su \(display.name): \(have) invece di \(count)") }
+        }
+        Log.write("Scrivanie aggiunte: \(added), tolte: \(removed)")
+        return (added, removed)
+    }
+
+    private static func describe(_ counts: [CGDirectDisplayID: Int], _ displays: [LiveDisplay]) -> String {
+        guard !counts.isEmpty else { return "nessuna" }
+        return counts.map { id, count in
+            "\(count) su \(displays.first(where: { $0.id == id })?.name ?? "monitor \(id)")"
+        }.joined(separator: ", ")
+    }
+
+    /// Apre Mission Control, aggiunge e toglie scrivanie, lo richiude.
+    private static func missionControlPass(toAdd: [CGDirectDisplayID: Int], toRemove: [CGDirectDisplayID: Int],
+                                           current: [CGDirectDisplayID: DesktopLayout],
+                                           displays: [LiveDisplay]) async -> (added: Int, removed: Int) {
         guard let dock = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock").first else {
             Log.write("Dock non trovato: scrivanie non modificate")
             return (0, 0)
         }
-
-        toggleMissionControl()
-        await Input.pause(1.2)
         let dockElement = AXUIElementCreateApplication(dock.processIdentifier)
+        toggleMissionControl()
+
+        // Aspetto che Mission Control sia aperto (fino a 3 secondi).
+        var groups: [CGDirectDisplayID: AXUIElement] = [:]
+        for _ in 0..<12 {
+            await Input.pause(0.25)
+            groups = displayGroups(in: dockElement)
+            if !groups.isEmpty { break }
+        }
+        await Input.pause(0.5)
+        groups = displayGroups(in: dockElement)
+        Log.write("Mission Control: \(groups.count) monitor riconosciuti (\(groups.keys.map { "\($0)" }.joined(separator: ", ")))")
+
         var added = 0
         var removed = 0
-
         for display in displays where toAdd[display.id] != nil || toRemove[display.id] != nil {
             // Il mouse in alto apre la barra delle scrivanie di quel monitor.
             Input.moveMouse(to: CGPoint(x: display.bounds.midX, y: display.bounds.minY + 4))
-            await Input.pause(0.7)
+            await Input.pause(0.8)
+            let group = displayGroups(in: dockElement)[display.id] ?? groups[display.id]
 
             if let count = toAdd[display.id] {
-                var buttons: [AXUIElement] = []
-                collect(identifier: "mc.spaces.add", in: dockElement, depth: 0, into: &buttons)
-                if let button = buttons.first(where: { isOn(display, $0) }) {
+                if let button = addButton(for: display, group: group, dock: dockElement, displays: displays) {
                     for _ in 0..<count {
-                        if AXUIElementPerformAction(button, kAXPressAction as CFString) == .success { added += 1 }
-                        await Input.pause(0.5)
+                        let result = AXUIElementPerformAction(button, kAXPressAction as CFString)
+                        if result == .success {
+                            added += 1
+                        } else {
+                            Log.write("Pulsante + su \(display.name): errore \(result.rawValue)")
+                        }
+                        await Input.pause(0.6)
                     }
                 } else {
                     Log.write("Pulsante per aggiungere scrivanie non trovato su \(display.name)")
@@ -206,8 +248,13 @@ enum SpacesManager {
                     continue
                 }
                 var lists: [AXUIElement] = []
-                collect(identifier: "mc.spaces.list", in: dockElement, depth: 0, into: &lists)
-                for list in lists where isOn(display, list) {
+                if let group { collect(identifier: "mc.spaces.list", in: group, depth: 0, into: &lists) }
+                if lists.isEmpty {
+                    var all: [AXUIElement] = []
+                    collect(identifier: "mc.spaces.list", in: dockElement, depth: 0, into: &all)
+                    lists = all.filter { isOn(display, $0) }
+                }
+                for list in lists {
                     let buttons = WindowManager.children(of: list)
                         .compactMap { element -> (AXUIElement, CGFloat)? in
                             guard let point = WindowManager.position(of: element) else { return nil }
@@ -215,7 +262,10 @@ enum SpacesManager {
                         }
                         .sorted { $0.1 < $1.1 }
                         .map { $0.0 }
-                    guard buttons.count == userCount, buttons.count > count else { continue }
+                    guard buttons.count == userCount, buttons.count > count else {
+                        Log.write("Scrivanie di \(display.name) in Mission Control: \(buttons.count), attese \(userCount)")
+                        continue
+                    }
                     for button in buttons.suffix(count).reversed() {
                         guard let action = removeAction(of: button) else {
                             Log.write("Azione per togliere la scrivania non trovata")
@@ -224,6 +274,7 @@ enum SpacesManager {
                         if AXUIElementPerformAction(button, action as CFString) == .success { removed += 1 }
                         await Input.pause(0.6)
                     }
+                    break
                 }
             }
         }
@@ -231,8 +282,48 @@ enum SpacesManager {
         await Input.pause(0.4)
         toggleMissionControl()
         await Input.pause(0.9)
-        Log.write("Scrivanie aggiunte: \(added), tolte: \(removed)")
         return (added, removed)
+    }
+
+    /// Gruppi di Mission Control per monitor: macOS li marca con l'identificativo del monitor.
+    private static func displayGroups(in dock: AXUIElement) -> [CGDirectDisplayID: AXUIElement] {
+        var found: [AXUIElement] = []
+        collect(identifier: "mc.display", in: dock, depth: 0, into: &found)
+        var result: [CGDirectDisplayID: AXUIElement] = [:]
+        for group in found {
+            var value: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(group, "AXDisplayID" as CFString, &value) == .success,
+                  let number = value as? NSNumber else { continue }
+            result[CGDirectDisplayID(number.uint32Value)] = group
+        }
+        return result
+    }
+
+    /// Pulsante "+" di Mission Control per quel monitor: prima dal gruppo del monitor, poi per posizione.
+    private static func addButton(for display: LiveDisplay, group: AXUIElement?, dock: AXUIElement,
+                                  displays: [LiveDisplay]) -> AXUIElement? {
+        if let group {
+            var buttons: [AXUIElement] = []
+            collect(identifier: "mc.spaces.add", in: group, depth: 0, into: &buttons)
+            if let button = buttons.first { return button }
+        }
+        var all: [AXUIElement] = []
+        collect(identifier: "mc.spaces.add", in: dock, depth: 0, into: &all)
+        Log.write("Pulsanti + in Mission Control: \(all.count) " + all.map { button in
+            WindowManager.position(of: button).map { "(\(Int($0.x)), \(Int($0.y)))" } ?? "(?)"
+        }.joined(separator: " "))
+        if let button = all.first(where: { isOn(display, $0) }) { return button }
+        if all.count == 1, displays.count == 1 { return all[0] }
+        // Il più vicino all'angolo in alto a destra del monitor.
+        let corner = CGPoint(x: display.bounds.maxX, y: display.bounds.minY)
+        return all.min { lhs, rhs in
+            distance(WindowManager.position(of: lhs), corner) < distance(WindowManager.position(of: rhs), corner)
+        }
+    }
+
+    private static func distance(_ point: CGPoint?, _ target: CGPoint) -> CGFloat {
+        guard let point else { return .greatestFiniteMagnitude }
+        return abs(point.x - target.x) + abs(point.y - target.y)
     }
 
     private static func isOn(_ display: LiveDisplay, _ element: AXUIElement) -> Bool {
