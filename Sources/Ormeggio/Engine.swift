@@ -1490,8 +1490,14 @@ final class Engine {
     }
 
     /// Testo completo da mandare all'assistenza: diagnostica, scene (senza indirizzi web) e registro.
-    func supportReport() -> String {
-        var parts = ["=== Diagnostica ===", diagnostics(), "", "=== Scene ==="]
+    /// Diagnostica per l'assistenza. Con maxCharacters è la versione breve per la mail:
+    /// senza l'elenco delle risoluzioni e con le ultime righe del registro che ci stanno.
+    func supportReport(maxCharacters: Int? = nil) -> String {
+        var summary = diagnostics()
+        if maxCharacters != nil {
+            summary = summary.split(separator: "\n").filter { !$0.hasPrefix("   scale disponibili") }.joined(separator: "\n")
+        }
+        var parts = ["=== Diagnostica ===", summary, "", "=== Scene ==="]
         for scene in store.scenes {
             parts.append("• \(scene.name) [\(scene.fingerprint)] automatica: \(scene.autoApply ? "sì" : "no"), salvata \(scene.savedAt)")
             for display in scene.displays {
@@ -1513,11 +1519,25 @@ final class Engine {
             }
         }
         parts.append("")
-        parts.append("=== Registro (ultime 400 righe) ===")
-        if let log = try? String(contentsOf: Paths.log, encoding: .utf8) {
-            parts.append(log.split(separator: "\n", omittingEmptySubsequences: false).suffix(400).joined(separator: "\n"))
+        let logLines = (try? String(contentsOf: Paths.log, encoding: .utf8))?
+            .split(separator: "\n", omittingEmptySubsequences: false).map(String.init) ?? []
+        guard let maxCharacters else {
+            parts.append("=== Registro (ultime 400 righe) ===")
+            parts.append(logLines.suffix(400).joined(separator: "\n"))
+            return parts.joined(separator: "\n")
         }
-        return parts.joined(separator: "\n")
+        parts.append("=== Registro (ultime righe) ===")
+        var head = parts.joined(separator: "\n")
+        if head.count > maxCharacters { head = String(head.prefix(maxCharacters)) }
+        var budget = maxCharacters - head.count
+        var tail: [String] = []
+        for line in logLines.reversed() {
+            let cost = line.count + 1
+            if cost > budget { break }
+            tail.insert(line, at: 0)
+            budget -= cost
+        }
+        return head + "\n" + tail.joined(separator: "\n")
     }
 
     static func describe(_ tracked: [TrackedWindow]) -> String {

@@ -27,7 +27,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         engine.onStateChange = { [weak self] in self?.updateIcon() }
         engine.onActivity = { report in HUD.shared.show(report) }
-        HUD.shared.diagnostics = { [weak self] in self?.engine.supportReport() ?? "" }
+        HUD.shared.sendDiagnostics = { [weak self] in self?.sendDiagnostics() }
         engine.askChromeProfiles = { [weak self] titles, profiles in
             self?.askChromeProfiles(titles: titles, profiles: profiles) ?? []
         }
@@ -52,16 +52,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// Dopo un aggiornamento: lo dice nel riquadro e, se serve, ripara da solo il permesso di Accessibilità.
     private func showUpdateCompleted() {
-        UserDefaults.standard.removeObject(forKey: "updatedFrom")
-        if WindowManager.isTrusted(prompt: false) {
-            HUD.shared.show(ActivityReport(
-                kind: .success,
-                title: "Ormeggio aggiornato alla versione \(updater.currentVersion)",
-                subtitle: "Le tue scene sono al loro posto"
-            ))
-        } else {
-            repairPermissionAutomatically()
+        let defaults = UserDefaults.standard
+        defaults.removeObject(forKey: "updatedFrom")
+        if let notes = defaults.string(forKey: "pendingUpdateNotes") {
+            defaults.set(notes, forKey: "lastUpdateNotes")
+            defaults.set(updater.currentVersion, forKey: "lastUpdateVersion")
+            defaults.removeObject(forKey: "pendingUpdateNotes")
         }
+        guard WindowManager.isTrusted(prompt: false) else {
+            repairPermissionAutomatically()
+            return
+        }
+        // Se la versione di prima non ha lasciato le novità, le leggo dalla pagina degli aggiornamenti.
+        if defaults.string(forKey: "lastUpdateVersion") != updater.currentVersion {
+            Task { @MainActor in
+                if let info = await self.updater.latestPublished(), info.version == self.updater.currentVersion {
+                    defaults.set(info.notes ?? "", forKey: "lastUpdateNotes")
+                    defaults.set(info.version, forKey: "lastUpdateVersion")
+                }
+                self.showWhatsNew()
+            }
+        } else {
+            showWhatsNew()
+        }
+    }
+
+    /// Le novità dell'ultima versione installata, nel riquadro: una per riga.
+    @objc private func showWhatsNew() {
+        let defaults = UserDefaults.standard
+        let version = defaults.string(forKey: "lastUpdateVersion") ?? updater.currentVersion
+        let lines = (defaults.string(forKey: "lastUpdateNotes") ?? "")
+            .split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        let summary = lines.count > 1 ? lines[0] : nil
+        let items = lines.count > 1 ? Array(lines.dropFirst()) : lines
+        HUD.shared.show(ActivityReport(
+            kind: .success,
+            title: "Ormeggio aggiornato alla versione \(version)",
+            subtitle: summary ?? (items.isEmpty ? "Le tue scene sono al loro posto" : "Ecco cosa cambia"),
+            lines: items.map { ActivityReport.Line(text: $0) }
+        ))
     }
 
     /// Installa da sola la versione nuova, appena Ormeggio non sta spostando finestre.
@@ -152,6 +183,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         Log.write("Permesso di Accessibilità concesso")
         engine.refreshState()
         updateIcon()
+    }
+
+    /// Indirizzo a cui arrivano le diagnostiche. Claude controlla quella casella ogni ora,
+    /// corregge quello che non va e pubblica la versione nuova, che arriva a tutti da sola.
+    static let feedbackAddress = "mauro.amara@sparkfabrik.com"
+
+    /// Apre in Gmail una mail già pronta con la diagnostica: basta premere Invia.
+    @objc private func sendDiagnostics() {
+        let report = engine.supportReport(maxCharacters: 4500)
+        let subject = "[Ormeggio] Diagnostica \(updater.currentVersion) da \(NSFullUserName())"
+        let body = "Se vuoi, scrivi qui sopra cosa non è andato.\n\n" + report
+        // Codifico tutto tranne lettere e numeri inglesi: "&", "=" e "+" nel testo romperebbero l'indirizzo.
+        let allowed = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+        func encode(_ text: String) -> String { text.addingPercentEncoding(withAllowedCharacters: allowed) ?? "" }
+        let query = "view=cm&fs=1&to=\(encode(AppDelegate.feedbackAddress))&su=\(encode(subject))&body=\(encode(body))"
+        guard let url = URL(string: "https://mail.google.com/mail/?" + query) else { return }
+        NSWorkspace.shared.open(url)
+        Log.write("Diagnostica preparata in Gmail (\(report.count) caratteri)")
+        HUD.shared.show(ActivityReport(
+            kind: .success,
+            title: "Mail pronta in Gmail: premi Invia",
+            subtitle: "Claude la riceve, corregge e manda la versione nuova a tutti"
+        ))
     }
 
     @objc private func copyDiagnostics() {
@@ -332,12 +386,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         loginItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
         settingsMenu.addItem(loginItem)
         settingsMenu.addItem(.separator())
-        settingsMenu.addItem(commandItem("Copia la diagnostica per Claude", #selector(copyDiagnostics), icon: "doc.on.doc"))
+        settingsMenu.addItem(commandItem("Invia la diagnostica a Claude…", #selector(sendDiagnostics), icon: "paperplane"))
+        settingsMenu.addItem(commandItem("Copia la diagnostica", #selector(copyDiagnostics), icon: "doc.on.doc"))
         settingsMenu.addItem(commandItem("Diagnostica…", #selector(showDiagnostics), icon: "stethoscope"))
         settingsMenu.addItem(commandItem("Salva diagnostica per l'assistenza…", #selector(exportReport), icon: "doc.text"))
         settingsMenu.addItem(commandItem("Apri la cartella dei dati", #selector(openDataFolder), icon: "folder"))
         settingsMenu.addItem(.separator())
         settingsMenu.addItem(commandItem("Cerca aggiornamenti…", #selector(checkForUpdates), icon: "arrow.triangle.2.circlepath"))
+        if UserDefaults.standard.string(forKey: "lastUpdateNotes")?.isEmpty == false {
+            settingsMenu.addItem(commandItem("Novità dell'ultima versione", #selector(showWhatsNew), icon: "sparkles"))
+        }
         settingsMenu.addItem(infoItem("Versione \(updater.currentVersion)", icon: "info.circle"))
         settingsMenu.addItem(.separator())
         settingsMenu.addItem(commandItem("Disinstalla Ormeggio…", #selector(uninstall), icon: "trash"))

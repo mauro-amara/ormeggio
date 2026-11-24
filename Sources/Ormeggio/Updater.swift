@@ -55,6 +55,18 @@ final class Updater {
 
     /// Controlla se c'è una versione più recente. Restituisce nil se non c'è o se il controllo fallisce.
     @discardableResult
+    /// L'ultima versione pubblicata, senza installare niente (per leggerne le novità).
+    func latestPublished() async -> UpdateInfo? {
+        let stamp = Int(Date().timeIntervalSince1970)
+        guard let url = URL(string: Updater.feedBase + "latest.json?t=\(stamp)") else { return nil }
+        var request = URLRequest(url: url)
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.timeoutInterval = 20
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+        return try? JSONDecoder().decode(UpdateInfo.self, from: data)
+    }
+
     func check() async -> UpdateInfo? {
         let stamp = Int(Date().timeIntervalSince1970)
         guard let url = URL(string: Updater.feedBase + "latest.json?t=\(stamp)") else { return nil }
@@ -128,6 +140,8 @@ final class Updater {
         process.waitUntilExit()
 
         UserDefaults.standard.set(currentVersion, forKey: "updatedFrom")
+        // Le novità le mostro dopo il riavvio, nella versione nuova.
+        UserDefaults.standard.set(info.notes ?? "", forKey: "pendingUpdateNotes")
         Log.write("Aggiornamento alla \(info.version): installazione avviata")
         NSApp.terminate(nil)
     }

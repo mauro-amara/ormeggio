@@ -47,23 +47,19 @@ final class HUD {
 
     private var panel: NSPanel?
     private var hideTask: Task<Void, Never>?
-    /// Testo della diagnostica, per il pulsante che la copia quando qualcosa non va.
-    var diagnostics: (@MainActor () -> String)?
+    /// Manda la diagnostica a Claude: è il pulsante che compare quando qualcosa non va.
+    var sendDiagnostics: (@MainActor () -> Void)?
 
     func show(_ report: ActivityReport) {
         hideTask?.cancel()
         let panel = self.panel ?? makePanel()
         self.panel = panel
 
-        var copy: (@MainActor () -> Void)?
-        if report.kind == .warning || report.kind == .failure, let diagnostics {
-            copy = {
-                let pasteboard = NSPasteboard.general
-                pasteboard.clearContents()
-                pasteboard.setString(diagnostics(), forType: .string)
-            }
+        var send: (@MainActor () -> Void)?
+        if report.kind == .warning || report.kind == .failure, let sendDiagnostics {
+            send = sendDiagnostics
         }
-        let content = HUDView(report: report, onClose: { [weak self] in self?.hide() }, onCopyDiagnostics: copy)
+        let content = HUDView(report: report, onClose: { [weak self] in self?.hide() }, onSendDiagnostics: send)
         let hosting = FirstClickHostingView(rootView: content)
         let size = hosting.fittingSize
 
@@ -101,7 +97,13 @@ final class HUD {
         let seconds: Double?
         switch report.kind {
         case .working: seconds = nil
-        case .success: seconds = report.action == nil && report.lines.allSatisfy({ $0.tone == .done }) ? 6 : 20
+        case .success:
+            if report.action != nil || !report.lines.allSatisfy({ $0.tone == .done }) {
+                seconds = 20
+            } else {
+                // Il tempo di leggere: qualche secondo in più per ogni riga.
+                seconds = min(30, 6 + 3 * Double(report.lines.count))
+            }
         case .warning, .failure: seconds = 20
         }
         if let seconds {
@@ -151,8 +153,7 @@ final class HUD {
 private struct HUDView: View {
     let report: ActivityReport
     let onClose: () -> Void
-    let onCopyDiagnostics: (@MainActor () -> Void)?
-    @State private var copied = false
+    let onSendDiagnostics: (@MainActor () -> Void)?
 
     private var tint: Color {
         switch report.kind {
@@ -242,13 +243,11 @@ private struct HUDView: View {
                     }
                 }
             }
-            if let onCopyDiagnostics {
+            if let onSendDiagnostics {
                 Button {
-                    onCopyDiagnostics()
-                    copied = true
+                    onSendDiagnostics()
                 } label: {
-                    Label(copied ? "Copiata: incollala nella chat con Claude" : "Copia la diagnostica per Claude",
-                          systemImage: copied ? "checkmark" : "doc.on.doc")
+                    Label("Invia la diagnostica a Claude", systemImage: "paperplane")
                         .font(.callout)
                 }
                 .buttonStyle(.link)

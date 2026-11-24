@@ -41,7 +41,9 @@ jobs:
         run: |
           VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" Resources/Info.plist)
           BUILD=$(/usr/libexec/PlistBuddy -c "Print CFBundleVersion" Resources/Info.plist)
-          NOTES=$(git log -1 --pretty=%s | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read().strip()))')
+          # Note della versione: il messaggio del commit senza le righe tecniche in fondo.
+          # La prima riga è il riassunto, le altre (una per novità) compaiono nell'app dopo l'aggiornamento.
+          NOTES=$(git log -1 --pretty=%B | python3 -c 'import json,sys; rows=[r.strip() for r in sys.stdin.read().splitlines()]; keep=[r.lstrip("-• ").strip() for r in rows if r and not r.startswith(("Co-Authored-By","Claude-Session"))]; print(json.dumps("\n".join(keep)))')
           mkdir -p out
           cp build.log out/build.log 2>/dev/null || echo "Nessun registro" > out/build.log
           echo "${{ job.status }}" > out/esito.txt
