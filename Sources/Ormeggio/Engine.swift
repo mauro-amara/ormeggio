@@ -90,6 +90,9 @@ final class Engine {
     // MARK: Avvio e osservazione
 
     func start() {
+        for app in WindowManager.regularApps() {
+            WindowManager.disableFullAccessibility(pid: app.processIdentifier)
+        }
         let center = NotificationCenter.default
         observers.append(center.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
             guard let self else { return }
@@ -1460,6 +1463,11 @@ final class Engine {
         let tracked = inventory(displays: displays, profiles: [])
         let exposed = tracked.filter { $0.live != nil }.count
         lines.append("Finestre su tutte le scrivanie: \(tracked.count), viste dall'Accessibilità: \(exposed)")
+        let visible = tracked.filter { isOnVisibleDesktop($0, displays: displays) || $0.isMinimized }
+        let perApp = Dictionary(grouping: visible, by: \.appName).map { name, windows in
+            "\(name) \(windows.filter { $0.live != nil }.count) di \(windows.count)"
+        }.sorted()
+        lines.append("Sulle scrivanie visibili, viste dall'Accessibilità: " + perApp.joined(separator: ", "))
         lines.append("Finestre per scrivania: " + Engine.describe(tracked))
         let profiles = BrowserBridge.chromeProfiles()
         if !profiles.isEmpty {

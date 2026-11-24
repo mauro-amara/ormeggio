@@ -177,7 +177,24 @@ enum BrowserBridge {
         Log.write("Permesso Automazione azzerato (esito \(process.terminationStatus))")
     }
 
-    /// Riconosce il profilo di una finestra di Chrome dal pulsante del profilo nella barra degli strumenti.
+    /// Profilo di una finestra quando il titolo non basta. Non leggo più gli elementi interni di Chrome:
+    /// chiederli rende Chrome lentissimo a rispondere e le sue finestre spariscono per l'Accessibilità.
+    /// Il profilo lo danno il titolo e i file di sessione.
+    static func detectProfile(of window: LiveWindow, profiles: [ChromeProfile]) -> String? {
+        profiles.count == 1 ? profiles.first?.directory : nil
+    }
+
+    /// Profili di Chrome aperti adesso, dal file Local State di Chrome.
+    nonisolated static func openChromeProfileDirectories() -> Set<String> {
+        let url = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/Google/Chrome/Local State")
+        guard let data = try? Data(contentsOf: url),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let profile = json["profile"] as? [String: Any],
+              let active = profile["last_active_profiles"] as? [String] else { return [] }
+        return Set(active)
+    }
+
     static func detectProfile(of window: LiveWindow, profiles: [ChromeProfile]) -> String? {
         guard profiles.count > 1 else { return profiles.first?.directory }
         // Chrome espone l'albero completo dell'Accessibilità solo se glielo si chiede.

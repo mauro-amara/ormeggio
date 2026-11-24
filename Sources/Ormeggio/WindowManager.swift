@@ -42,7 +42,7 @@ enum WindowManager {
 
     private static func axWindows(of app: NSRunningApplication) -> [AXUIElement] {
         let axApp = AXUIElementCreateApplication(app.processIdentifier)
-        _ = AXUIElementSetMessagingTimeout(axApp, 1.0)
+        _ = AXUIElementSetMessagingTimeout(axApp, 2.0)
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &value) == .success,
               let elements = value as? [AXUIElement] else { return [] }
@@ -218,11 +218,12 @@ enum WindowManager {
         return (stringAttribute(element, kAXRoleAttribute) ?? "?") + " pid \(owner)"
     }
 
-    /// Chiede alle app fatte con Chromium o Electron (Chrome, Slack, Claude...) di mostrare
-    /// i loro elementi all'Accessibilità, così si vede dove sono pulsanti e schede.
-    static func enableFullAccessibility(pid: pid_t) {
+    /// Le versioni precedenti di Ormeggio chiedevano alle app fatte con Chromium o Electron (Chrome, Slack,
+    /// Claude...) di esporre tutti i loro elementi interni. Così rispondono lentissime e le loro finestre
+    /// spariscono per l'Accessibilità. Questa funzione annulla la richiesta.
+    static func disableFullAccessibility(pid: pid_t) {
         let app = AXUIElementCreateApplication(pid)
-        _ = AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+        _ = AXUIElementSetAttributeValue(app, "AXManualAccessibility" as CFString, kCFBooleanFalse)
     }
 
     /// Seleziona una voce della barra laterale (per esempio una pagina di Impostazioni di Sistema).

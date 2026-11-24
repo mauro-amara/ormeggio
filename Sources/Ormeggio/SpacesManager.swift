@@ -133,7 +133,6 @@ enum SpacesManager {
         guard let windowID = window.windowID else { return false }
         let targetSpace = layout.spaceIDs[targetIndex]
 
-        WindowManager.enableFullAccessibility(pid: window.pid)
         WindowManager.raise(window)
         await Input.pause(0.4)
         let start = WindowManager.frame(of: window.element) ?? window.frame

@@ -22,8 +22,11 @@ struct ChromeSessionWindow {
 /// Non serve nessun permesso di macOS: sono file dell'utente, e dicono di ogni finestra
 /// il profilo, la posizione e le schede. Chrome li aggiorna pochi secondi dopo ogni cambiamento.
 enum ChromeSession {
+    /// Finestre dei profili aperti adesso: i file dei profili chiusi descrivono finestre che non ci sono più.
     static func windows(profiles: [ChromeProfile]) -> [ChromeSessionWindow] {
-        profiles.flatMap { windows(profileDirectory: $0.directory) }
+        let open = BrowserBridge.openChromeProfileDirectories()
+        let wanted = open.isEmpty ? profiles : profiles.filter { open.contains($0.directory) }
+        return wanted.flatMap { windows(profileDirectory: $0.directory) }
     }
 
     static func windows(profileDirectory: String) -> [ChromeSessionWindow] {
