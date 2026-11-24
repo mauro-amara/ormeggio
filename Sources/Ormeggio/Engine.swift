@@ -1253,54 +1253,87 @@ final class Engine {
     }
 
     /// Porta ogni finestra sul monitor e sulla scrivania della scena.
+    ///
+    /// macOS non lascia alle app spostare una finestra su un'altra scrivania, ma quando una finestra
+    /// passa a un altro monitor la mette sempre sulla scrivania visibile di quel monitor. Quindi:
+    /// - finestra sul monitor sbagliato: porto il monitor giusto sulla scrivania giusta, poi ci sposto la finestra;
+    /// - finestra sulla scrivania sbagliata dello stesso monitor: la appoggio un attimo sull'altro monitor,
+    ///   porto il suo monitor sulla scrivania giusta e ce la rimetto.
+    /// Con un monitor solo resta il trascinamento con ctrl + freccia.
     private func relocate(_ assignments: inout [Assignment], scene: SavedScene, displays: [LiveDisplay]) async {
         let fallback = displays.first(where: \.isBuiltin) ?? displays.first
+        let useDesktops = manageSpaces && SpacesManager.isAvailable
+        let order = assignments.indices.sorted { lhs, rhs in
+            let left = assignments[lhs].saved
+            let right = assignments[rhs].saved
+            if left.displayKey != right.displayKey { return left.displayKey < right.displayKey }
+            return (left.desktop ?? 0) < (right.desktop ?? 0)
+        }
+        for index in order {
+            guard let target = displays.first(where: { $0.key == assignments[index].saved.displayKey }) ?? fallback else { continue }
+            let wanted = useDesktops ? assignments[index].saved.desktop : nil
+            let sameDisplay = assignments[index].tracked.displayKey == target.key
+            let sameDesktop = wanted == nil || assignments[index].tracked.desktop == wanted
+            if sameDisplay && sameDesktop { continue }
+            if assignments[index].tracked.isFullScreen { continue }
+            if let wanted, let count = SpacesManager.layouts(for: displays)[target.id]?.count, wanted > count {
+                Log.write("\(assignments[index].saved.appName): la scrivania \(wanted) di \(target.name) non c'è (sono \(count))")
+                continue
+            }
 
-        // Monitor sbagliato: sposto la finestra sul monitor giusto.
-        for index in assignments.indices {
-            let target = displays.first(where: { $0.key == assignments[index].saved.displayKey }) ?? fallback
-            guard let target, assignments[index].tracked.displayKey != target.key else { continue }
+            // La finestra deve essere raggiungibile: porto in vista la sua scrivania.
             if assignments[index].tracked.live == nil || !isOnVisibleDesktop(assignments[index].tracked, displays: displays) {
                 await reveal(assignments[index].tracked, displays: displays)
+                await Input.pause(0.2)
                 if let id = assignments[index].tracked.windowID,
                    let live = WindowManager.resolve(windowID: id, pid: assignments[index].tracked.pid) {
                     assignments[index].tracked.live = live
                 }
             }
-            guard let live = assignments[index].tracked.live else { continue }
+            guard let live = assignments[index].tracked.live else {
+                Log.write("\(assignments[index].saved.appName): finestra non raggiungibile, non la sposto")
+                continue
+            }
+            let name = "\(assignments[index].saved.appName) \"\(assignments[index].saved.title)\""
             let frame = targetFrame(for: assignments[index].saved, on: target, scene: scene)
-            WindowManager.setFrame(live.element, to: frame)
-            await Input.pause(0.2)
-            assignments[index].tracked.displayKey = target.key
-            assignments[index].tracked.frame = frame
-            assignments[index].tracked.desktop = SpacesManager.layouts(for: displays)[target.id]?.currentIndex.map { $0 + 1 }
-            assignments[index].needsFrame = true
-        }
 
-        // Scrivania sbagliata: trascino la finestra sulla scrivania giusta.
-        guard manageSpaces, SpacesManager.isAvailable else { return }
-        let order = assignments.indices.sorted { lhs, rhs in
-            let left = assignments[lhs].tracked
-            let right = assignments[rhs].tracked
-            if left.displayKey != right.displayKey { return left.displayKey < right.displayKey }
-            return (left.desktop ?? 0) < (right.desktop ?? 0)
-        }
-        for index in order {
-            guard let wanted = assignments[index].saved.desktop, let current = assignments[index].tracked.desktop, wanted != current,
-                  let display = displays.first(where: { $0.key == assignments[index].tracked.displayKey }),
-                  let layout = SpacesManager.layouts(for: displays)[display.id], wanted <= layout.count else { continue }
-            guard await SpacesManager.switchDesktop(on: display, to: current - 1, displays: displays) else { continue }
-            await Input.pause(0.2)
-            // Dopo il cambio di scrivania la finestra è visibile: ne prendo l'elemento aggiornato.
-            if let id = assignments[index].tracked.windowID,
-               let live = WindowManager.resolve(windowID: id, pid: assignments[index].tracked.pid) {
-                assignments[index].tracked.live = live
+            if !sameDisplay {
+                if let wanted { await SpacesManager.switchDesktop(on: target, to: wanted - 1, displays: displays) }
+                WindowManager.setFrame(live.element, to: frame)
+                await Input.pause(0.4)
+                Log.write("\(name): portata su \(target.name)" + (wanted.map { ", scrivania \($0)" } ?? ""))
+            } else if let wanted, let other = displays.first(where: { $0.id != target.id }) {
+                // Passaggio per l'altro monitor.
+                let size = CGSize(width: min(frame.width, other.bounds.width * 0.8), height: min(frame.height, other.bounds.height * 0.8))
+                let parking = CGRect(x: other.bounds.midX - size.width / 2, y: other.bounds.midY - size.height / 2,
+                                     width: size.width, height: size.height)
+                WindowManager.setFrame(live.element, to: parking)
+                await Input.pause(0.4)
+                await SpacesManager.switchDesktop(on: target, to: wanted - 1, displays: displays)
+                await Input.pause(0.3)
+                WindowManager.setFrame(live.element, to: frame)
+                await Input.pause(0.4)
+                Log.write("\(name): passata per \(other.name) e rimessa su \(target.name), scrivania \(wanted)")
+            } else if let wanted {
+                _ = await SpacesManager.moveWindow(live, on: target, to: wanted - 1, displays: displays)
             }
-            guard let live = assignments[index].tracked.live else { continue }
-            if await SpacesManager.moveWindow(live, on: display, to: wanted - 1, displays: displays) {
-                assignments[index].tracked.desktop = wanted
-            }
+
+            // Controllo dove è finita davvero.
+            assignments[index].tracked.frame = frame
             assignments[index].needsFrame = true
+            if let id = assignments[index].tracked.windowID {
+                let spaces = SpacesManager.spaceIDs(forWindow: id)
+                let layouts = SpacesManager.layouts(for: displays)
+                for display in displays {
+                    guard let layout = layouts[display.id],
+                          let position = layout.spaceIDs.firstIndex(where: { spaces.contains($0) }) else { continue }
+                    assignments[index].tracked.displayKey = display.key
+                    assignments[index].tracked.desktop = position + 1
+                }
+                let arrived = assignments[index].tracked.displayKey == target.key
+                    && (wanted == nil || assignments[index].tracked.desktop == wanted)
+                Log.write("\(name): ora su \(assignments[index].tracked.displayKey) scrivania \(assignments[index].tracked.desktop.map { "\($0)" } ?? "?")" + (arrived ? "" : " (NON al suo posto)"))
+            }
         }
     }
 

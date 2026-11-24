@@ -123,65 +123,61 @@ enum SpacesManager {
         return layouts(for: displays)[display.id]?.currentIndex == targetIndex
     }
 
-    /// Sposta una finestra dalla scrivania visibile a un'altra dello stesso monitor:
-    /// la tiene per la barra in alto e cambia scrivania con ctrl + freccia.
-    /// Prova più punti finché la finestra non si aggancia davvero al mouse.
+    /// Sposta una finestra dalla scrivania visibile a un'altra dello stesso monitor, quando c'è un monitor solo:
+    /// la tiene per la barra in alto e cambia scrivania con ctrl + freccia. Prova fino a tre punti di presa
+    /// e controlla alla fine su quale scrivania è finita.
     static func moveWindow(_ window: LiveWindow, on display: LiveDisplay, to targetIndex: Int, displays: [LiveDisplay]) async -> Bool {
         guard let layout = layouts(for: displays)[display.id], let current = layout.currentIndex,
               layout.spaceIDs.indices.contains(targetIndex) else { return false }
         if current == targetIndex { return true }
+        guard let windowID = window.windowID else { return false }
+        let targetSpace = layout.spaceIDs[targetIndex]
 
         WindowManager.enableFullAccessibility(pid: window.pid)
         WindowManager.raise(window)
         await Input.pause(0.4)
         let start = WindowManager.frame(of: window.element) ?? window.frame
+        Log.write("Trascino \"\(window.title)\" dalla scrivania \(current + 1) alla \(targetIndex + 1) di \(display.name)")
 
-        Log.write("Sposto \"\(window.title)\" dalla scrivania \(current + 1) alla \(targetIndex + 1) di \(display.name), finestra a \(Int(start.minX)),\(Int(start.minY)) \(Int(start.width))x\(Int(start.height))")
-        var held: CGPoint?
+        var points: [CGPoint] = []
         for point in WindowManager.grabCandidates(of: window, frame: start) {
+            if start.contains(point), WindowManager.isDraggableArea(point, pid: window.pid) {
+                points.append(point)
+            } else {
+                Log.write("   punto \(Int(point.x)),\(Int(point.y)) scartato (\(WindowManager.roleAt(point)))")
+            }
+        }
+        for (attempt, point) in points.prefix(3).enumerated() {
+            if attempt > 0 {
+                _ = await switchDesktop(on: display, to: current, displays: displays)
+                WindowManager.raise(window)
+                await Input.pause(0.4)
+            }
             let role = WindowManager.roleAt(point)
-            guard start.contains(point), WindowManager.isDraggableArea(point, pid: window.pid) else {
-                Log.write("   punto \(Int(point.x)),\(Int(point.y)) scartato (\(role))")
-                continue
-            }
             Input.moveMouse(to: point)
-            await Input.pause(0.1)
-            Input.mouse(.leftMouseDown, at: point)
             await Input.pause(0.15)
-            Input.mouse(.leftMouseDragged, at: CGPoint(x: point.x + 3, y: point.y))
-            await Input.pause(0.05)
-            let moved = CGPoint(x: point.x + 6, y: point.y)
-            Input.mouse(.leftMouseDragged, at: moved)
-            await Input.pause(0.25)
-            let now = WindowManager.frame(of: window.element)
-            Log.write("   punto \(Int(point.x)),\(Int(point.y)) (\(role)): finestra " + (now.map { "a \(Int($0.minX)),\(Int($0.minY))" } ?? "non leggibile"))
-            if let now, abs(now.minX - start.minX) >= 2 {
-                held = moved
-                break
-            }
-            Input.mouse(.leftMouseUp, at: moved)
+            Input.mouse(.leftMouseDown, at: point)
             await Input.pause(0.2)
+            Input.mouse(.leftMouseDragged, at: CGPoint(x: point.x + 3, y: point.y))
+            await Input.pause(0.08)
+            let held = CGPoint(x: point.x + 6, y: point.y)
+            Input.mouse(.leftMouseDragged, at: held)
+            await Input.pause(0.3)
+            let steps = targetIndex - current
+            for _ in 0..<abs(steps) {
+                Input.pressDesktopArrow(right: steps > 0)
+                await Input.pause(0.9)
+                Input.mouse(.leftMouseDragged, at: held)
+            }
+            await Input.pause(0.3)
+            Input.mouse(.leftMouseUp, at: held)
+            await Input.pause(0.6)
+            let spaces = spaceIDs(forWindow: windowID)
+            let moved = spaces.contains(targetSpace)
+            Log.write("   tentativo \(attempt + 1) dal punto \(Int(point.x)),\(Int(point.y)) (\(role)): " + (moved ? "spostata" : "NON spostata, spazi \(spaces)"))
+            if moved { return true }
         }
-        guard let held else {
-            Log.write("Finestra \"\(window.title)\": nessun punto da cui afferrarla")
-            return false
-        }
-
-        let steps = targetIndex - current
-        for _ in 0..<abs(steps) {
-            Input.pressDesktopArrow(right: steps > 0)
-            await Input.pause(0.8)
-        }
-        Input.mouse(.leftMouseUp, at: held)
-        await Input.pause(0.5)
-
-        guard let windowID = window.windowID else { return true }
-        let targetSpace = layout.spaceIDs[targetIndex]
-        let spaces = spaceIDs(forWindow: windowID)
-        let moved = spaces.contains(targetSpace)
-        let nowIndex = layouts(for: displays)[display.id]?.currentIndex.map { $0 + 1 } ?? 0
-        Log.write("   dopo il cambio: scrivania visibile \(nowIndex), finestra negli spazi \(spaces), atteso \(targetSpace): " + (moved ? "spostata" : "NON spostata"))
-        return moved
+        return false
     }
 
     // MARK: Aggiungere e togliere scrivanie (Mission Control)
