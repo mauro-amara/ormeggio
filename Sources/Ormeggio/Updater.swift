@@ -26,7 +26,7 @@ enum UpdateError: LocalizedError {
 @MainActor
 final class Updater {
     /// Dove la compilazione su GitHub pubblica DMG e latest.json.
-    static let feedBase = "https://raw.githubusercontent.com/mauroamara/ormeggio-mac/builds/"
+    static let feedBase = "https://raw.githubusercontent.com/mauro-amara/ormeggio/builds/"
 
     private(set) var available: UpdateInfo?
     var onChange: (@MainActor () -> Void)?
