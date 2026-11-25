@@ -1,6 +1,8 @@
 # Ormeggio
 
-App per la barra dei menu del Mac che salva e richiama **scene** di lavoro: ogni finestra al suo posto, con un clic.
+App gratuita per Mac che salva e richiama la disposizione delle tue finestre: ogni app sul suo monitor, sulla sua scrivania, alla sua misura. Con un clic, o da sola quando ricolleghi il monitor.
+
+**[Scarica Ormeggio](https://github.com/mauro-amara/ormeggio/raw/builds/Ormeggio.dmg)** · gratis · macOS 14 o successivo · Mac con processore Apple o Intel
 
 ## Il problema
 
@@ -10,115 +12,106 @@ Gli strumenti che esistono risolvono un pezzo ciascuno. Stay ricorda le finestre
 
 ## La soluzione
 
-Ormeggio è un'app gratuita per la barra dei menu. Sistemi il Mac come ti serve e salvi una **scena** con un nome: Ufficio, Casa, Mac da solo. Quando la richiami, con un clic o in automatico quando ricolleghi gli stessi monitor, Ormeggio rimette risoluzione, scrivanie, app aperte, posizione di ogni finestra, cartelle del Finder, finestre di Chrome nel profilo giusto con le loro schede, e zoom. Alla fine un riquadro a schermo dice cosa ha sistemato e cosa no, con il motivo.
+Sistemi il Mac come ti serve e salvi una **scena** con un nome: Ufficio, Casa, Mac da solo. Quando la richiami, con un clic o in automatico quando ricolleghi gli stessi monitor, Ormeggio rimette risoluzione, scrivanie, app aperte, posizione di ogni finestra, cartelle del Finder, finestre di Chrome nel profilo giusto con le loro schede, e zoom. Alla fine un riquadro a schermo dice cosa ha sistemato e cosa no, con il motivo.
 
-## Per chi la usa
+Tutto resta sul tuo Mac: niente account, niente dati che escono.
 
-### Installare
+## Installare
 
-**Cosa serve:** un Mac con macOS 14 (Sonoma) o successivo, con processore Apple o Intel. Ci vogliono un paio di minuti.
-
-Ci sono due modi. Il primo è quello classico: scarichi e trascini. Il secondo è una riga da incollare nel Terminale, e serve se il primo si blocca.
-
-#### Perché macOS blocca Ormeggio la prima volta
-
-macOS apre senza avvisi solo le app certificate da Apple. Ormeggio non lo è ancora, quindi la prima volta che lo apri macOS mostra "Ormeggio non è stata aperta". Non vuol dire che sia pericoloso: macOS non ha modo di controllarlo. Lo sblocchi una volta sola, poi si apre normalmente, anche dopo gli aggiornamenti.
-
-#### Modo 1: scarica e trascina
+Ci vogliono un paio di minuti.
 
 1. Scarica **[Ormeggio.dmg](https://github.com/mauro-amara/ormeggio/raw/builds/Ormeggio.dmg)**. Il link scarica sempre l'ultima versione.
 2. Apri il file scaricato con un doppio clic. Si apre una finestra con l'icona di Ormeggio e la cartella Applicazioni.
 3. Trascina l'icona di **Ormeggio** sulla cartella **Applicazioni**.
 4. Apri la cartella Applicazioni (nel Finder, a sinistra) e apri **Ormeggio** con un doppio clic.
-5. Compare "Ormeggio non è stata aperta". Premi **Fine**. Non premere "Sposta nel Cestino".
-6. Apri **Impostazioni di Sistema** (menu Apple in alto a sinistra) e scegli **Privacy e sicurezza**. Scorri fino in fondo alla pagina.
+
+### La prima volta macOS lo blocca
+
+Compare il messaggio "Ormeggio non è stata aperta". È normale: macOS apre senza avvisi solo le app certificate da Apple, e Ormeggio non lo è ancora. Non vuol dire che sia pericoloso. Lo sblocchi una volta sola, poi si apre sempre, anche dopo gli aggiornamenti.
+
+5. Premi **Fine**. Non premere "Sposta nel Cestino".
+6. Apri **Impostazioni di Sistema** (menu Apple, in alto a sinistra) e scegli **Privacy e sicurezza**. Scorri fino in fondo alla pagina.
 7. Accanto al messaggio su Ormeggio premi **Apri comunque**. macOS chiede la password del Mac o Touch ID.
-8. Nella finestra che compare premi di nuovo **Apri comunque**. Ormeggio si apre: continua da [Primo avvio](#primo-avvio).
+8. Nella finestra che compare premi di nuovo **Apri comunque**.
 
-Se al passo 7 il pulsante **Apri comunque** non c'è, apri di nuovo Ormeggio da Applicazioni e torna subito in Privacy e sicurezza: il pulsante compare solo per un po' dopo il blocco. Se non c'è ancora, o se dopo il passo 8 ricompare "Ormeggio non è stata aperta", usa il modo 2.
+Il pulsante **Apri comunque** compare solo per un po' dopo il blocco. Se non lo trovi, apri di nuovo Ormeggio da Applicazioni e torna subito in Privacy e sicurezza. Se ancora non c'è, vedi [Se macOS non apre Ormeggio](#se-macos-non-apre-ormeggio).
 
-#### Modo 2: una riga nel Terminale
+### Primo avvio
 
-Funziona anche sui Mac gestiti dall'azienda, dove "Apri comunque" a volte è disattivato. Non serve aver fatto il modo 1, e se l'hai fatto non importa: questa riga sostituisce l'app che hai già copiato.
+1. Si apre il **benvenuto** di Ormeggio. La casella "Avvia Ormeggio quando accendi il Mac" è già spuntata: lasciala così se vuoi che parta da solo. Premi **Continua**.
+2. Si apre Impostazioni di Sistema su **Accessibilità**. È il permesso che serve per spostare le finestre, e macOS lo fa dare solo a te: accendi l'interruttore accanto a **Ormeggio**.
+3. Se Ormeggio non è nell'elenco, premi **+** in fondo all'elenco, scegli **Ormeggio** nella cartella Applicazioni, premi **Apri** e accendi l'interruttore.
+4. Quando il permesso è attivo, un riquadro in basso dice "Permesso attivo". L'icona di Ormeggio è nella barra in alto, vicino all'orologio.
 
-1. Apri il **Terminale**: cartella Applicazioni, poi Utility, poi Terminale. Oppure premi cmd + spazio, scrivi "Terminale" e premi Invio.
-2. Copia questa riga, incollala nel Terminale e premi Invio:
+macOS può chiedere altri due permessi, la prima volta che servono:
+
+- **Notifiche**: premi **Consenti**. Servono per avvisarti quando arriva una versione nuova.
+- **Controllo di Chrome, Safari o del Finder**, quando salvi una scena con quelle app aperte: premi **OK**. Serve per ritrovare schede e cartelle. Ormeggio non legge il contenuto delle pagine e non tocca i tuoi file.
+
+## Usare
+
+Il menu di Ormeggio, dall'icona nella barra in alto, ha cinque voci:
+
+- **Vedi le scene…**: tutte le tue scene, per richiamarle, rinominarle, cambiare icona, eliminarle.
+- **Salva scena…**: sistema le finestre come ti servono e dai un nome. Puoi chiedere che la scena parta da sola quando ricolleghi gli stessi monitor.
+- **Richiama scena**: clic sul nome della scena. Quella in uso ha il segno di spunta.
+- **Aggiornamenti**: controlla subito se c'è una versione nuova.
+- **Segnalazioni**: prepara un file con la diagnostica, quando qualcosa non va.
+
+Sotto ci sono **Impostazioni** ed **Esci**.
+
+Il richiamo di solito dura un secondo o due: rimette monitor, posizioni, misure e finestre dal Dock. Se qualche finestra è su una scrivania diversa da quella della scena, il riquadro alla fine propone **Sposta ogni finestra sulla sua scrivania**: ci vuole qualche secondo e in quel tempo non bisogna toccare mouse e tastiera.
+
+### Zoom
+
+Lo zoom di Chrome Ormeggio lo salva da solo, sito per sito e profilo per profilo, e lo rimette quando richiami la scena. Serve soprattutto quando cambi monitor con una risoluzione diversa. In Chrome lo zoom vale per tutto il sito: se nessuna scheda di quel sito è in vista, Ormeggio apre per un attimo una scheda del sito, rimette lo zoom e la richiude. Per le altre app (per esempio Slack): **Vedi le scene…** > menu della scena > **Zoom delle app…**.
+
+### Aggiornamenti
+
+Ormeggio controlla ogni mezz'ora se c'è una versione nuova e la installa da solo: si chiude, si aggiorna e si riapre, e le scene restano. Subito dopo arriva una notifica con le novità. Le novità si rileggono in **Impostazioni** > **Novità dell'ultima versione**.
+
+### Disinstallare
+
+Icona di Ormeggio > **Impostazioni** > **Disinstalla Ormeggio…**. Toglie l'avvio all'accensione, le scene salvate e i permessi, e sposta l'app nel Cestino.
+
+## Se qualcosa non va
+
+| Cosa vedi | Cosa fare |
+| --- | --- |
+| "Ormeggio non è stata aperta" e in Privacy e sicurezza non c'è "Apri comunque" | Vedi [Se macOS non apre Ormeggio](#se-macos-non-apre-ormeggio). |
+| "Ormeggio è danneggiato e non può essere aperto" | È lo stesso blocco di macOS, con un altro messaggio. Vedi [Se macOS non apre Ormeggio](#se-macos-non-apre-ormeggio). |
+| Ormeggio non è nell'elenco di Accessibilità | Premi **+** in fondo all'elenco, scegli Ormeggio in Applicazioni e premi Apri. |
+| L'interruttore è acceso, ma Ormeggio dice che manca il permesso | Icona di Ormeggio > **Ripara il permesso di Accessibilità…**, poi riaccendi l'interruttore. |
+| Non vedo l'icona nella barra in alto | Sui Mac con la tacca nello schermo le icone di troppo finiscono dietro la tacca. Chiudi qualche altra app della barra, oppure riapri Ormeggio da Applicazioni. |
+| Il riquadro dice di non toccare mouse e tastiera | Ormeggio sta spostando le finestre: aspetta qualche secondo che finisca. |
+| Una finestra non torna al suo posto | Richiama di nuovo la scena. Se succede sempre, prepara una segnalazione. |
+
+### Se macOS non apre Ormeggio
+
+Su alcuni Mac, soprattutto quelli gestiti da un'azienda, "Apri comunque" non c'è o non funziona. In quel caso Ormeggio si installa con una riga nel Terminale, l'app del Mac per dare comandi scritti. Se non l'hai mai usato non preoccuparti: è una sola riga da copiare e incollare. Oppure chiedi a qualcuno pratico di farlo con te.
+
+1. Apri il **Terminale**: premi cmd + spazio, scrivi "Terminale" e premi Invio. Si apre una finestra con del testo.
+2. Copia questa riga (c'è il pulsante per copiarla a destra), incollala nella finestra del Terminale e premi Invio:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/mauro-amara/ormeggio/main/install.sh | sh
 ```
 
-3. In pochi secondi compaiono tre righe: "Scarico Ormeggio...", "Installo in Applicazioni...", "Fatto". Ormeggio si apre da solo: continua da [Primo avvio](#primo-avvio). Il Terminale puoi chiuderlo.
+3. In pochi secondi compaiono tre righe, l'ultima dice "Fatto". Ormeggio si apre da solo: continua da [Primo avvio](#primo-avvio). Il Terminale puoi chiuderlo.
 
-Cosa fa la riga: scarica da questo repository lo script [install.sh](install.sh) e lo esegue. Lo script scarica l'ultima versione e, prima di installarla, controlla tre cose: che il file sia identico a quello pubblicato (impronta SHA-256), che dentro ci sia proprio Ormeggio e che la firma sia intatta. Se un controllo non passa, si ferma e non installa niente. Poi copia Ormeggio in Applicazioni e lo apre. Non chiede la password e non tocca nient'altro sul Mac. Scaricato così, macOS non lo blocca.
+Non serve aver trascinato Ormeggio in Applicazioni: questa riga lo scarica e lo mette lì al posto tuo. Non chiede la password e non tocca nient'altro sul Mac. Prima di installare controlla che il file sia identico a quello pubblicato, che dentro ci sia proprio Ormeggio e che la firma sia intatta: se un controllo non passa, si ferma. Il programma che esegue è [install.sh](install.sh), in questo repository.
 
-Se il Terminale scrive "Ormeggio non installato", copia la riga che segue e mandala a chi mantiene Ormeggio.
+### Segnalare un problema
 
-#### Primo avvio
+[Apri una segnalazione](https://github.com/mauro-amara/ormeggio/issues/new) e racconta cosa è successo: cosa hai fatto, cosa ti aspettavi, cosa hai visto. Serve un account GitHub, gratuito. La pagina è pubblica: **non allegare** il file che prepara "Segnalazioni", perché contiene i titoli delle tue finestre. Se servirà, ti verrà chiesto nella segnalazione come mandarlo.
 
-1. Si apre il **benvenuto** di Ormeggio. La casella "Avvia Ormeggio quando accendi il Mac" è già spuntata: lasciala così, se vuoi che parta da solo. Premi **Continua**.
-2. macOS chiede il permesso di **Accessibilità** e si apre Impostazioni di Sistema su quella pagina. Serve a Ormeggio per spostare le finestre, ed è l'unica cosa che macOS non lascia fare a un'app: l'interruttore lo accendi tu. Accendi quello accanto a **Ormeggio**.
-3. Se Ormeggio non è nell'elenco, premi **+** in fondo all'elenco, scegli **Ormeggio** nella cartella Applicazioni, premi **Apri** e accendi l'interruttore.
-4. Quando il permesso è attivo, un riquadro in basso dice "Permesso attivo". L'icona di Ormeggio è nella barra in alto, vicino all'orologio.
-5. Sistema le finestre come ti servono e scegli **Salva scena…** dall'icona. Fatto.
-
-macOS può chiedere altri due permessi, la prima volta che servono:
-
-- **Notifiche**: premi **Consenti**. Servono per avvisarti quando arriva una versione nuova.
-- **Controllo di Chrome, Safari o del Finder**, quando salvi una scena con quelle app aperte: premi **OK**. Serve per ritrovare schede e cartelle. Ormeggio non legge le pagine e non tocca i file.
-
-#### Se l'installazione non va
-
-| Cosa vedi | Cosa fare |
-| --- | --- |
-| "Ormeggio non è stata aperta" e in Privacy e sicurezza non c'è "Apri comunque" | Usa il [modo 2](#modo-2-una-riga-nel-terminale). |
-| "Ormeggio è danneggiato e non può essere aperto" | È lo stesso blocco di macOS, con un altro messaggio. Usa il modo 2. |
-| Ormeggio non è nell'elenco di Accessibilità | Premi **+** in fondo all'elenco, scegli Ormeggio in Applicazioni e premi Apri. |
-| L'interruttore è acceso, ma Ormeggio dice che manca il permesso | Icona di Ormeggio > **Ripara il permesso di Accessibilità…**, poi riaccendi l'interruttore. |
-| Non vedo l'icona nella barra in alto | Sui Mac con la tacca nello schermo le icone di troppo finiscono dietro la tacca. Chiudi qualche altra app della barra, oppure riapri Ormeggio da Applicazioni. |
-| Il riquadro dice di non toccare mouse e tastiera | Ormeggio sta spostando le finestre: aspetta qualche secondo che finisca. |
-
-Per qualsiasi altro problema: icona di Ormeggio > **Segnalazioni**, e manda il file a chi mantiene Ormeggio.
-
-### Usare
-
-Il menu ha cinque voci:
-
-- **Vedi le scene…**: finestra con tutte le scene, per richiamarle, rinominarle, eliminarle.
-- **Salva scena…**: sistema il Mac come ti serve, scegli un nome. Puoi chiedere che la scena parta da sola quando ricolleghi gli stessi monitor.
-- **Richiama scena**: clic sul nome della scena. La scena in uso ha il segno di spunta.
-- **Aggiornamenti**: controlla subito se c'è una versione nuova.
-- **Segnalazioni**: prepara il file da mandare quando qualcosa non va.
-
-Sotto ci sono **Impostazioni** ed **Esci**.
-
-Il salvataggio legge le finestre di tutte le scrivanie senza farle scorrere. Quando richiami una scena, Ormeggio passa solo dalle scrivanie dove deve spostare una finestra: in quei secondi non toccare mouse e tastiera. Un riquadro in basso dice quando ha finito, cosa ha sistemato e cosa no.
-
-La prima volta che salvi con Finder, Chrome o Safari aperti, macOS chiede se Ormeggio può controllarli: rispondi OK. Serve per sapere quali cartelle e schede sono aperte.
-
-### Zoom
-
-Lo zoom di Chrome Ormeggio lo salva da solo, sito per sito e profilo per profilo, e lo rimette quando richiami la scena. In Chrome lo zoom vale per tutto il sito: se nessuna scheda di quel sito è in vista, Ormeggio apre per un attimo una scheda del sito, ci mette lo zoom e la richiude. Chrome scrive lo zoom con qualche secondo di ritardo: Ormeggio lo rilegge 12 secondi dopo il salvataggio e aggiorna la scena. Per le altre app (per esempio Slack): Vedi le scene > menu della scena > **Zoom delle app…**, scegli l'ingrandimento di ogni app.
-
-### Aggiornamenti
-
-Ormeggio controlla ogni mezz'ora se c'è una versione nuova e la installa da solo: si chiude, si aggiorna e si riapre. Subito dopo arriva una notifica di macOS a ogni persona che lo usa, con le novità. La prima volta macOS chiede se Ormeggio può mandare notifiche: premi **Consenti**. Dal menu di Ormeggio: **Aggiornamenti** per averla subito. Le novità si rileggono in **Impostazioni** > **Novità dell'ultima versione**.
-
-### Se qualcosa non va
-
-Icona di Ormeggio > **Segnalazioni**. Ormeggio prepara un file con la diagnostica e lo mostra nel Finder: mandalo a chi mantiene Ormeggio. Il file resta sul Mac finché non lo mandi tu. Contiene il registro delle ultime operazioni e i titoli delle finestre, mai gli indirizzi delle schede.
-
-### Disinstallare
-
-Icona di Ormeggio > Impostazioni > **Disinstalla Ormeggio…**. Toglie l'avvio all'accensione, le scene salvate, i permessi e sposta l'app nel Cestino.
-
-## Sicurezza e dati
+## Privacy e sicurezza
 
 - **Permessi.** Ormeggio usa l'Accessibilità per spostare le finestre e, se concessa, l'Automazione per leggere schede e cartelle. Non chiede altro: niente registrazione dello schermo, niente accesso ai file.
 - **Dati.** Scene e registro stanno in `~/Library/Application Support/Ormeggio`, leggibili solo dalla persona. Non escono dal Mac. Nel registro ci sono i titoli delle finestre e i nomi dei siti, mai gli indirizzi completi delle schede.
 - **Aggiornamenti.** Si scaricano solo da questo repository, in HTTPS. Prima di installare, Ormeggio controlla che il file sia identico a quello pubblicato (impronta SHA-256), che contenga proprio Ormeggio nella versione annunciata e che la firma sia intatta. Se un controllo non passa, l'aggiornamento non si installa. La compilazione usa solo git e gli strumenti di Apple, senza azioni di terzi, e fa gli stessi controlli prima di pubblicare.
 - **Limite noto.** L'app è firmata localmente, non con un certificato Developer ID di Apple. La sicurezza degli aggiornamenti dipende quindi dall'account GitHub che pubblica. Il passo successivo è firmare e certificare l'app con un account sviluppatore Apple: da lì si apre senza avvisi.
-- **Segnalazioni.** Niente parte da solo: "Segnalazioni" crea un file sul Mac, e la persona decide se e a chi mandarlo. Nell'app non c'è nessuna chiave o password.
+- **Segnalazioni.** Niente parte da solo: "Segnalazioni" crea un file sul Mac, e decidi tu se e a chi mandarlo. Nell'app non c'è nessuna chiave o password, e nessun dato viene raccolto.
 
 ## Cosa fa
 
@@ -155,7 +148,7 @@ bash scripts/make-dmg.sh
 
 A ogni push su `main`, GitHub Actions (`.github/workflows/build.yml`) compila su un Mac in cloud, allega il DMG all'esecuzione e lo pubblica con il registro di compilazione nel ramo `builds`.
 
-Per firmare con Developer ID imposta la variabile `SIGN_IDENTITY` prima di `build-app.sh`; la notarizzazione va aggiunta al workflow con le credenziali dell'account Apple Developer aziendale.
+Per firmare con Developer ID imposta la variabile `SIGN_IDENTITY` prima di `build-app.sh`; la notarizzazione va aggiunta al workflow con le credenziali di un account Apple Developer.
 
 | File | Ruolo |
 | --- | --- |

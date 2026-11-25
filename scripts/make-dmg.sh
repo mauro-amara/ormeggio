@@ -25,15 +25,8 @@ certificato da Apple. Lo sblocchi una volta sola.
 5. Nella finestra che compare premi di nuovo "Apri comunque".
 
 SE "APRI COMUNQUE" NON C'È, O IL BLOCCO RICOMPARE
-Succede soprattutto sui Mac gestiti dall'azienda. Fai così:
-a. Apri il Terminale: premi cmd + spazio, scrivi Terminale e premi Invio.
-b. Copia questa riga, incollala nel Terminale e premi Invio:
-
-curl -fsSL https://raw.githubusercontent.com/mauro-amara/ormeggio/main/install.sh | sh
-
-c. Quando compare "Fatto", Ormeggio si apre da solo. Puoi chiudere il Terminale.
-La riga scarica l'ultima versione, controlla che sia quella giusta e integra,
-la mette in Applicazioni e la apre. Non chiede password.
+Succede su alcuni Mac gestiti da un'azienda. C'è un altro modo, spiegato passo per passo qui:
+https://github.com/mauro-amara/ormeggio#se-macos-non-apre-ormeggio
 
 PRIMO AVVIO
 6. Nel benvenuto premi "Continua".
