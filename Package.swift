@@ -8,6 +8,12 @@ let package = Package(
         .executableTarget(
             name: "Ormeggio",
             path: "Sources/Ormeggio"
+        ),
+        // Controlli automatici contro le regressioni: girano a ogni compilazione, prima di pubblicare.
+        .testTarget(
+            name: "OrmeggioTests",
+            dependencies: ["Ormeggio"],
+            path: "Tests/OrmeggioTests"
         )
     ]
 )

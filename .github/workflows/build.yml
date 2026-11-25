@@ -28,6 +28,13 @@ jobs:
       - name: Versione di Swift
         run: swift --version
 
+      # Controlli automatici contro le regressioni: se uno non passa, la versione non viene pubblicata.
+      - name: Controlli automatici
+        shell: bash
+        run: |
+          set -o pipefail
+          swift test 2>&1 | tee test.log | tail -40
+
       - name: Compila l'app
         shell: bash
         run: |
@@ -101,19 +108,21 @@ jobs:
           SHA=$(shasum -a 256 "$DMG" | cut -d' ' -f1)
           API="https://api.github.com/repos/${GITHUB_REPOSITORY}"
           AUTH=(-H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github+json")
+          # GitHub a volte risponde con un errore momentaneo: riprovo fino a tre volte.
+          retry() { for attempt in 1 2 3; do if "$@"; then return 0; fi; sleep 5; done; return 1; }
           git log -1 --pretty=%B | grep -v -E '^(Co-Authored-By|Claude-Session)' > notes.txt
           printf '\nImpronta SHA-256 di Ormeggio.dmg: %s\n' "$SHA" >> notes.txt
           EXISTING=$(curl -fsS "${AUTH[@]}" "$API/releases/tags/$TAG" || true)
           ID=$(printf '%s' "$EXISTING" | python3 -c 'import json,sys; d=sys.stdin.read().strip(); print(json.loads(d).get("id","") if d else "")')
           if [ -z "$ID" ]; then
             BODY=$(python3 -c 'import json,sys; print(json.dumps({"tag_name": sys.argv[1], "target_commitish": sys.argv[2], "name": "Ormeggio " + sys.argv[3], "body": open("notes.txt").read()}))' "$TAG" "$GITHUB_SHA" "$VERSION")
-            ID=$(curl -fsS "${AUTH[@]}" -X POST "$API/releases" -d "$BODY" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+            ID=$(retry curl -fsS "${AUTH[@]}" -X POST "$API/releases" -d "$BODY" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
           else
             # Stessa versione ricompilata: tolgo il file vecchio prima di mettere quello nuovo.
             for ASSET in $(printf '%s' "$EXISTING" | python3 -c 'import json,sys; print(" ".join(str(a["id"]) for a in json.load(sys.stdin).get("assets", []) if a["name"] == "Ormeggio.dmg"))'); do
-              curl -fsS "${AUTH[@]}" -X DELETE "$API/releases/assets/$ASSET"
+              retry curl -fsS "${AUTH[@]}" -X DELETE "$API/releases/assets/$ASSET"
             done
           fi
-          curl -fsS "${AUTH[@]}" -H "Content-Type: application/octet-stream" --data-binary @"$DMG" \
+          retry curl -fsS "${AUTH[@]}" -H "Content-Type: application/octet-stream" --data-binary @"$DMG" \
             "https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/$ID/assets?name=Ormeggio.dmg" > /dev/null
           echo "Release $TAG pubblicata con Ormeggio.dmg"
