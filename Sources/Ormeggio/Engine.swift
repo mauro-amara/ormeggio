@@ -786,6 +786,8 @@ final class Engine {
                             ? (diff == 1 ? "aggiunta 1 scrivania" : "aggiunte \(diff) scrivanie")
                             : (diff == 1 ? "tolta 1 scrivania" : "tolte \(diff) scrivanie")
                         notes.append(.init(text: "\(label): \(what), ora sono \(have) come nella scena"))
+                    } else if have > count {
+                        notes.append(.init(text: "\(label): nella scena le scrivanie sono \(count), adesso sono \(have). Quelle in più hanno ancora finestre sopra e non le tolgo.", warning: true))
                     } else if have != count {
                         notes.append(.init(text: "\(label): nella scena le scrivanie sono \(count), adesso sono \(have). Non sono riuscito a sistemarle.", warning: true))
                     }
@@ -1540,6 +1542,11 @@ final class Engine {
     ///   porto il suo monitor sulla scrivania giusta e ce la rimetto.
     /// Con un monitor solo resta il trascinamento con ctrl + freccia.
     private func relocate(_ assignments: inout [Assignment], scene: SavedScene, displays: [LiveDisplay], thorough: Bool) async {
+        // Richiamo completo con più monitor: prima a gruppi, un cambio di scrivania per gruppo.
+        // Il giro una finestra alla volta qui sotto resta per quelle che non sono arrivate.
+        if thorough, displays.count > 1 {
+            await relocateInGroups(&assignments, scene: scene, displays: displays)
+        }
         let fallback = displays.first(where: \.isBuiltin) ?? displays.first
         let useDesktops = manageSpaces && SpacesManager.isAvailable
         let visibleDesktops = SpacesManager.layouts(for: displays).mapValues { $0.currentIndex.map { $0 + 1 } }
@@ -1642,6 +1649,86 @@ final class Engine {
                     && (wanted == nil || assignments[index].tracked.desktop == wanted)
                 Log.write("\(name): ora su \(assignments[index].tracked.displayKey) scrivania \(assignments[index].tracked.desktop.map { "\($0)" } ?? "?")" + (arrived ? "" : " (NON al suo posto)"))
             }
+        }
+    }
+
+    /// Sposta le finestre sulle scrivanie giuste a gruppi: per ogni scrivania di arrivo un solo cambio di scrivania.
+    /// Le finestre su scrivanie non in vista le raggiungo senza mostrarle (elementi letti da tutte le scrivanie).
+    /// Quelle che restano sullo stesso monitor passano un attimo dall'altro monitor.
+    private func relocateInGroups(_ assignments: inout [Assignment], scene: SavedScene, displays: [LiveDisplay]) async {
+        guard manageSpaces, SpacesManager.isAvailable else { return }
+        let fallback = displays.first(where: \.isBuiltin) ?? displays.first
+        let layouts = SpacesManager.layouts(for: displays)
+        var groups: [String: [Int]] = [:]
+        var destinations: [String: (display: LiveDisplay, desktop: Int)] = [:]
+        for index in assignments.indices {
+            let tracked = assignments[index].tracked
+            guard let target = displays.first(where: { $0.key == assignments[index].saved.displayKey }) ?? fallback,
+                  let wanted = assignments[index].saved.desktop,
+                  !tracked.isFullScreen, tracked.windowID != nil,
+                  let count = layouts[target.id]?.count, wanted <= count else { continue }
+            if tracked.displayKey == target.key && tracked.desktop == wanted { continue }
+            let key = "\(target.key)#\(wanted)"
+            groups[key, default: []].append(index)
+            destinations[key] = (target, wanted)
+        }
+        guard !groups.isEmpty else { return }
+        Log.write("Spostamenti a gruppi: \(groups.values.map(\.count).reduce(0, +)) finestre su \(groups.count) scrivanie")
+
+        for key in groups.keys.sorted() {
+            guard let indices = groups[key], let destination = destinations[key],
+                  let other = displays.first(where: { $0.id != destination.display.id }) else { continue }
+            let target = destination.display
+            var elements: [Int: AXUIElement] = [:]
+            for index in indices {
+                let tracked = assignments[index].tracked
+                if let live = tracked.live, isOnVisibleDesktop(tracked, displays: displays) {
+                    elements[index] = live.element
+                } else if let id = tracked.windowID, let element = elementsOnAllDesktops(pid: tracked.pid)[id] {
+                    elements[index] = element
+                }
+            }
+            // Quelle già sul monitor di arrivo passano dall'altro monitor, così non restano sulla scrivania vecchia.
+            var parked = false
+            for index in indices where assignments[index].tracked.displayKey == target.key {
+                guard let element = elements[index] else { continue }
+                let frame = targetFrame(for: assignments[index].saved, on: target, scene: scene)
+                let size = CGSize(width: min(frame.width, other.bounds.width * 0.8), height: min(frame.height, other.bounds.height * 0.8))
+                WindowManager.setFrame(element, to: CGRect(x: other.bounds.midX - size.width / 2, y: other.bounds.midY - size.height / 2,
+                                                           width: size.width, height: size.height))
+                parked = true
+            }
+            if parked { await Input.pause(0.3) }
+            let switched = await SpacesManager.switchDesktop(on: target, to: destination.desktop - 1, displays: displays)
+            for index in indices {
+                guard let element = elements[index] else { continue }
+                WindowManager.setFrame(element, to: targetFrame(for: assignments[index].saved, on: target, scene: scene))
+                assignments[index].needsFrame = true
+            }
+            await Input.pause(0.3)
+            var arrived = 0
+            for index in indices {
+                locate(&assignments[index], displays: displays)
+                if assignments[index].tracked.displayKey == target.key && assignments[index].tracked.desktop == destination.desktop {
+                    arrived += 1
+                } else {
+                    Log.write("\(assignments[index].saved.appName) \"\(assignments[index].saved.title)\": non arrivata a gruppi" + (elements[index] == nil ? " (non raggiungibile)" : ""))
+                }
+            }
+            Log.write("\(target.name), scrivania \(destination.desktop): arrivate \(arrived) di \(indices.count)" + (switched ? "" : " (il cambio di scrivania non ha risposto)"))
+        }
+    }
+
+    /// Aggiorna monitor e scrivania di una finestra con quello che dice il server delle finestre.
+    private func locate(_ assignment: inout Assignment, displays: [LiveDisplay]) {
+        guard let id = assignment.tracked.windowID else { return }
+        let spaces = SpacesManager.spaceIDs(forWindow: id)
+        let layouts = SpacesManager.layouts(for: displays)
+        for display in displays {
+            guard let layout = layouts[display.id],
+                  let position = layout.spaceIDs.firstIndex(where: { spaces.contains($0) }) else { continue }
+            assignment.tracked.displayKey = display.key
+            assignment.tracked.desktop = position + 1
         }
     }
 
