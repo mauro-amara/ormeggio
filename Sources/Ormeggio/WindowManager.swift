@@ -22,6 +22,9 @@ struct SystemWindow {
     let bounds: CGRect
     let name: String?
     let alpha: Double
+    /// Vero se in questo momento è disegnata sullo schermo (anche coperta da altre).
+    /// Falso per le finestre sulle altre scrivanie, nel Dock, o chiuse ma tenute in memoria dall'app.
+    let onScreen: Bool
 }
 
 @MainActor
@@ -91,7 +94,8 @@ enum WindowManager {
                 pid: pid,
                 bounds: bounds,
                 name: entry[kCGWindowName as String] as? String,
-                alpha: (entry[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 1
+                alpha: (entry[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 1,
+                onScreen: (entry[kCGWindowIsOnscreen as String] as? NSNumber)?.boolValue ?? false
             )
         }
     }
@@ -175,7 +179,12 @@ enum WindowManager {
     /// Le finestre standard di un'app su tutte le scrivanie, come elementi di Accessibilità:
     /// servono per agire su una finestra (per esempio ridurla nel Dock) senza cambiare scrivania.
     static func elementsOnAllDesktops(pid: pid_t) -> [CGWindowID: AXUIElement] {
-        guard let pointer = remoteTokenPointer else { return [:] }
+        remoteWindows(pid: pid).elements
+    }
+
+    /// Come sopra, e dice anche se la ricerca è arrivata in fondo: solo allora "non c'è" vuol dire davvero che non c'è.
+    static func remoteWindows(pid: pid_t) -> (elements: [CGWindowID: AXUIElement], complete: Bool) {
+        guard let pointer = remoteTokenPointer else { return ([:], false) }
         let create = unsafeBitCast(pointer, to: CreateWithRemoteTokenFn.self)
         var token = Data(count: 20)
         token.replaceSubrange(0..<4, with: withUnsafeBytes(of: pid) { Data($0) })
@@ -183,8 +192,12 @@ enum WindowManager {
         token.replaceSubrange(8..<12, with: withUnsafeBytes(of: Int32(0x636f636f)) { Data($0) })
         var result: [CGWindowID: AXUIElement] = [:]
         let started = Date()
+        var complete = true
         for elementID in UInt64(0)..<UInt64(1000) {
-            if Date().timeIntervalSince(started) > 1.5 { break }
+            if Date().timeIntervalSince(started) > 1.5 {
+                complete = false
+                break
+            }
             token.replaceSubrange(12..<20, with: withUnsafeBytes(of: elementID) { Data($0) })
             guard let element = create(token as CFData)?.takeRetainedValue() else { continue }
             _ = AXUIElementSetMessagingTimeout(element, 0.1)
@@ -193,7 +206,7 @@ enum WindowManager {
             _ = AXUIElementSetMessagingTimeout(element, 2.0)
             result[id] = element
         }
-        return result
+        return (result, complete)
     }
 
     // MARK: Azioni sulle finestre

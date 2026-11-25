@@ -76,14 +76,22 @@ final class Engine {
     private var lastFingerprint: String?
     private var isBusy = false
     /// Finestre delle altre scrivanie lette durante un richiamo: la lettura costa, la faccio una volta per app.
-    private var remoteCache: [pid_t: [CGWindowID: AXUIElement]] = [:]
+    private var remoteCache: [pid_t: (elements: [CGWindowID: AXUIElement], complete: Bool)] = [:]
 
-    private func elementsOnAllDesktops(pid: pid_t) -> [CGWindowID: AXUIElement] {
+    private func remoteWindows(pid: pid_t) -> (elements: [CGWindowID: AXUIElement], complete: Bool) {
         if let cached = remoteCache[pid] { return cached }
-        let found = WindowManager.elementsOnAllDesktops(pid: pid)
+        let found = WindowManager.remoteWindows(pid: pid)
         remoteCache[pid] = found
         return found
     }
+
+    private func elementsOnAllDesktops(pid: pid_t) -> [CGWindowID: AXUIElement] {
+        remoteWindows(pid: pid).elements
+    }
+
+    /// Finestre "fantasma" trovate dall'ultimo inventario: chiuse ma tenute in memoria dall'app.
+    /// macOS le conta, ma non si vedono e non si possono spostare: Ormeggio le ignora.
+    private(set) var ghostWindows: [CGWindowID: String] = [:]
     private var pendingCheck: Task<Void, Never>?
     private var observers: [NSObjectProtocol] = []
 
@@ -337,7 +345,7 @@ final class Engine {
             }
         }
 
-        let tracked = inventory(displays: displays, profiles: profiles, knownProfiles: knownProfiles)
+        let tracked = inventory(displays: displays, profiles: profiles, knownProfiles: knownProfiles, strict: true)
 
         let savedDisplays = displays.map { display in
             DisplayInfo(
@@ -463,11 +471,16 @@ final class Engine {
     /// Trova le finestre aperte e su quale monitor e scrivania si trovano, senza cambiare scrivania.
     /// Le posizioni vengono dal server delle finestre di macOS; titoli ed elementi di Accessibilità
     /// si aggiungono per le finestre che macOS espone.
+    /// strict: controlla anche le finestre sulle scrivanie non in vista per scartare quelle fantasma.
+    /// Costa qualche decimo di secondo per app, quindi si usa solo dove serve precisione (salvataggio, scrivanie).
     private func inventory(displays: [LiveDisplay], profiles: [ChromeProfile],
                            knownProfiles: [CGWindowID: String] = [:],
-                           excluding: Set<CGWindowID> = []) -> [TrackedWindow] {
+                           excluding: Set<CGWindowID> = [],
+                           strict: Bool = false) -> [TrackedWindow] {
         let layouts = SpacesManager.layouts(for: displays)
         let userSpaces = Set(layouts.values.flatMap(\.spaceIDs))
+        let visibleSpaces = Set(layouts.values.compactMap { layout in layout.currentIndex.flatMap { layout.spaceIDs[safe: $0] } })
+        var ghosts: [CGWindowID: String] = [:]
         var appsByPID: [pid_t: NSRunningApplication] = [:]
         var liveByID: [CGWindowID: LiveWindow] = [:]
         var liveWithoutID: [LiveWindow] = []
@@ -534,6 +547,25 @@ final class Engine {
                 // Tengo solo quelle normali: su una sola scrivania, visibili e non minuscole.
                 guard !exposedIDs.contains(system.id), spaces.count == 1, userSpaces.contains(spaces[0]),
                       system.alpha > 0, system.bounds.width >= 120, system.bounds.height >= 90 else { continue }
+                // Finestre fantasma: chiuse ma tenute in memoria dall'app. Sulla scrivania in vista non sono
+                // disegnate; sulle altre scrivanie l'app non le conosce. Non si vedono e non si spostano.
+                let name = app.localizedName ?? "?"
+                // Già riconosciuta come fantasma in un giro precedente e ancora non disegnata: resta fantasma.
+                if ghostWindows[system.id] != nil && !system.onScreen {
+                    ghosts[system.id] = name
+                    continue
+                }
+                if visibleSpaces.contains(spaces[0]) && !system.onScreen {
+                    ghosts[system.id] = name
+                    continue
+                }
+                if strict, !visibleSpaces.contains(spaces[0]) {
+                    let remote = remoteWindows(pid: app.processIdentifier)
+                    if remote.complete && remote.elements[system.id] == nil {
+                        ghosts[system.id] = name
+                        continue
+                    }
+                }
                 seen.insert(system.id)
                 var title = system.name ?? ""
                 var document: String?
@@ -548,6 +580,13 @@ final class Engine {
                 }
                 add(id: system.id, app: app, live: nil, frame: system.bounds, title: title, spaces: spaces, document: document)
             }
+        }
+
+        if excluding.isEmpty {
+            if ghosts != ghostWindows, !ghosts.isEmpty {
+                Log.write("Finestre fantasma (chiuse ma tenute in memoria dall'app), le ignoro: " + ghosts.values.sorted().joined(separator: ", "))
+            }
+            ghostWindows = ghosts
         }
 
         // 2. Finestre dell'Accessibilità rimaste fuori (per esempio ridotte nel Dock).
@@ -686,6 +725,7 @@ final class Engine {
     /// Completo (thorough): aggiunge e toglie scrivanie e sposta le finestre tra le scrivanie, che costa
     /// mezzo secondo per ogni cambio di scrivania. Parte solo se la persona lo chiede dal riquadro.
     func apply(_ scene: SavedScene, thorough: Bool = false) async {
+        var scene = scene
         guard !isBusy else { return }
         guard WindowManager.isTrusted(prompt: false) else {
             Log.write("Scena \"\(scene.name)\" non richiamata: manca il permesso di Accessibilità")
@@ -835,9 +875,16 @@ final class Engine {
         for window in scene.windows {
             if let id = window.windowID, let profile = window.chromeProfile { knownProfiles[id] = profile }
         }
-        var tracked = inventory(displays: displays, profiles: profiles, knownProfiles: knownProfiles)
+        var tracked = inventory(displays: displays, profiles: profiles, knownProfiles: knownProfiles, strict: thorough)
         if usesChrome { Engine.attachChromeTabs(&tracked, profiles: profiles) }
         Log.write("Finestre trovate: \(tracked.count). " + Engine.describe(tracked))
+        // Le finestre fantasma salvate in una scena (chiuse ma tenute in memoria dall'app) non si cercano più.
+        let ghostIDs = Set(ghostWindows.keys)
+        let ghostsInScene = scene.windows.filter { $0.windowID.map { ghostIDs.contains($0) } ?? false }
+        if !ghostsInScene.isEmpty {
+            scene.windows.removeAll { $0.windowID.map { ghostIDs.contains($0) } ?? false }
+            Log.write("Nella scena ci sono finestre fantasma, le salto: " + ghostsInScene.map(\.appName).joined(separator: ", "))
+        }
         clock.mark("inventario")
 
         // 5. Abbinamento tra finestre salvate e finestre aperte
@@ -941,7 +988,8 @@ final class Engine {
         await relocate(&assignments, scene: scene, displays: displays, thorough: thorough)
         if thorough, !spacesWanted.isEmpty {
             // Ora che le finestre sono al loro posto tolgo le scrivanie in più, solo se vuote.
-            _ = await SpacesManager.adjustSpaces(wanted: spacesWanted, displays: displays, allowRemove: true)
+            _ = await SpacesManager.adjustSpaces(wanted: spacesWanted, displays: displays, allowRemove: true,
+                                                 ignoring: Set(ghostWindows.keys))
             refresh(&assignments, displays: displays)
         }
         reportSpaces()
@@ -1879,7 +1927,7 @@ final class Engine {
             lines.append(line)
             lines.append("   scale disponibili: " + DisplayManager.availableScales(of: display.id).joined(separator: ", "))
         }
-        let tracked = inventory(displays: displays, profiles: [])
+        let tracked = inventory(displays: displays, profiles: [], strict: true)
         let exposed = tracked.filter { $0.live != nil }.count
         lines.append("Finestre su tutte le scrivanie: \(tracked.count), viste dall'Accessibilità: \(exposed)")
         let visible = tracked.filter { isOnVisibleDesktop($0, displays: displays) || $0.isMinimized }
@@ -1888,6 +1936,9 @@ final class Engine {
         }.sorted()
         lines.append("Sulle scrivanie visibili, viste dall'Accessibilità: " + perApp.joined(separator: ", "))
         lines.append("Finestre per scrivania: " + Engine.describe(tracked))
+        if !ghostWindows.isEmpty {
+            lines.append("Finestre fantasma ignorate (chiuse ma tenute in memoria dall'app): " + ghostWindows.values.sorted().joined(separator: ", "))
+        }
         let profiles = BrowserBridge.chromeProfiles()
         if !profiles.isEmpty {
             lines.append("Profili Chrome: \(profiles.map { "\($0.name) (\($0.directory))" }.joined(separator: ", "))")

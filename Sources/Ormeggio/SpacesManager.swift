@@ -217,7 +217,8 @@ enum SpacesManager {
     /// e solo se sul monitor non ci sono app a tutto schermo. Controlla il risultato e riprova una volta.
     /// Con allowRemove falso aggiunge soltanto. Toglie solo le scrivanie in più che sono vuote:
     /// togliere una scrivania con finestre le butterebbe su un'altra e farebbe confusione.
-    static func adjustSpaces(wanted: [CGDirectDisplayID: Int], displays: [LiveDisplay], allowRemove: Bool) async -> (added: Int, removed: Int) {
+    static func adjustSpaces(wanted: [CGDirectDisplayID: Int], displays: [LiveDisplay], allowRemove: Bool,
+                             ignoring ghosts: Set<CGWindowID> = []) async -> (added: Int, removed: Int) {
         var added = 0
         var removed = 0
         for attempt in 1...2 {
@@ -231,7 +232,7 @@ enum SpacesManager {
             }
             guard !toAdd.isEmpty || !toRemove.isEmpty else { break }
             Log.write("Scrivanie, tentativo \(attempt): da aggiungere \(describe(toAdd, displays)), da togliere \(describe(toRemove, displays))")
-            let result = await missionControlPass(toAdd: toAdd, toRemove: toRemove, current: current, displays: displays)
+            let result = await missionControlPass(toAdd: toAdd, toRemove: toRemove, current: current, displays: displays, ignoring: ghosts)
             added += result.added
             removed += result.removed
             await Input.pause(0.4)
@@ -265,7 +266,8 @@ enum SpacesManager {
     /// Apre Mission Control, aggiunge e toglie scrivanie, lo richiude.
     private static func missionControlPass(toAdd: [CGDirectDisplayID: Int], toRemove: [CGDirectDisplayID: Int],
                                            current: [CGDirectDisplayID: DesktopLayout],
-                                           displays: [LiveDisplay]) async -> (added: Int, removed: Int) {
+                                           displays: [LiveDisplay],
+                                           ignoring ghosts: Set<CGWindowID>) async -> (added: Int, removed: Int) {
         guard let dock = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock").first else {
             Log.write("Dock non trovato: scrivanie non modificate")
             return (0, 0)
@@ -336,7 +338,7 @@ enum SpacesManager {
                     // Solo le scrivanie oltre quelle della scena, e solo se vuote.
                     let keep = userCount - count
                     let spaceIDs = current[display.id]?.spaceIDs ?? []
-                    let occupied = occupiedSpaces()
+                    let occupied = occupiedSpaces(ignoring: ghosts)
                     var removable: [AXUIElement] = []
                     for (position, button) in buttons.enumerated() where position >= keep {
                         if let id = spaceIDs[safe: position], occupied.contains(id) {
@@ -365,11 +367,12 @@ enum SpacesManager {
     }
 
     /// Scrivanie su cui c'è almeno una finestra normale di un'app.
-    static func occupiedSpaces() -> Set<Int> {
+    static func occupiedSpaces(ignoring ghosts: Set<CGWindowID> = []) -> Set<Int> {
         let regular = Set(WindowManager.regularApps().map(\.processIdentifier))
         var result = Set<Int>()
         for window in WindowManager.systemWindows()
-        where regular.contains(window.pid) && window.alpha > 0 && window.bounds.width >= 120 && window.bounds.height >= 90 {
+        where regular.contains(window.pid) && !ghosts.contains(window.id)
+            && window.alpha > 0 && window.bounds.width >= 120 && window.bounds.height >= 90 {
             result.formUnion(spaceIDs(forWindow: window.id))
         }
         return result
