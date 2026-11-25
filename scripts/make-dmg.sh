@@ -21,7 +21,8 @@ LA PRIMA VOLTA macOS lo blocca ("Ormeggio non è stata aperta"): è normale.
 4. Apri Impostazioni di Sistema > Privacy e sicurezza, scorri in fondo
    e accanto al messaggio su Ormeggio premi "Apri comunque". Poi la password del Mac.
 5. Nella finestra che compare premi di nuovo "Apri comunque".
-6. Nel benvenuto di Ormeggio premi "Continua" e attiva Ormeggio in Accessibilità.
+6. Nel benvenuto di Ormeggio premi "Continua" e accendi Ormeggio in Accessibilità.
+   Se Ormeggio non è nell'elenco: premi + in fondo, scegli Ormeggio in Applicazioni, premi Apri.
 
 USARE
 L'icona di Ormeggio è nella barra in alto, vicino all'orologio.

@@ -174,10 +174,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             process.waitUntilExit()
             Log.write("Voce di Accessibilità azzerata (esito \(process.terminationStatus))")
         }
-        if !WindowManager.isTrusted(prompt: true) {
-            openAccessibilitySettings()
-        }
+        askAccessibility(delay: 0.6)
         watchPermission()
+    }
+
+    /// Chiede il permesso di Accessibilità: macOS aggiunge Ormeggio all'elenco un attimo dopo.
+    /// Impostazioni di Sistema lo apro solo dopo: se lo aprissi subito, l'elenco non lo mostrerebbe ancora.
+    private func askAccessibility(delay: Double = 0) {
+        Task { @MainActor [weak self] in
+            if delay > 0 { try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)) }
+            guard !WindowManager.isTrusted(prompt: true) else { return }
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            guard let self, !WindowManager.isTrusted(prompt: false) else { return }
+            self.openAccessibilitySettings()
+        }
     }
 
     @objc private func repairPermissionFromMenu() {
@@ -192,7 +202,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             kind: .warning,
             title: "Accendi Ormeggio in Accessibilità",
             subtitle: "È l'unica cosa che macOS non lascia fare a un'app",
-            lines: [.init(text: "Ho aperto Impostazioni di Sistema su Accessibilità. Accendi l'interruttore accanto a Ormeggio: il resto lo faccio io.", tone: .info)]
+            lines: [
+                .init(text: "In Impostazioni di Sistema, Accessibilità, accendi l'interruttore accanto a Ormeggio: il resto lo faccio io.", tone: .info),
+                .init(text: "Ormeggio non è nell'elenco? Premi + in fondo all'elenco, scegli Ormeggio in Applicazioni e premi Apri.", tone: .info)
+            ],
+            actionTitle: "Apri Impostazioni di Sistema",
+            action: { [weak self] in self?.openAccessibilitySettings() },
+            offersReport: false
         ))
     }
 
@@ -217,6 +233,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         Log.write("Permesso di Accessibilità concesso")
         engine.refreshState()
         updateIcon()
+        HUD.shared.show(ActivityReport(kind: .success, title: "Permesso attivo", subtitle: "Ormeggio è pronto: salva la tua prima scena dall'icona in alto"))
     }
 
     /// "Prepara segnalazione": un file con la diagnostica, da trascinare nella chat con Claude.
@@ -295,7 +312,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         alert.informativeText = """
         Ormeggio salva le tue scene di lavoro: app aperte, finestre su ogni monitor e scrivania, scala dei monitor. Le richiami con un clic dall'icona in alto, vicino all'orologio.
 
-        Per spostare le finestre serve un permesso di macOS. Premi "Continua": si apre Impostazioni di Sistema, attiva Ormeggio nell'elenco Accessibilità e torna qui.
+        Per spostare le finestre serve un permesso di macOS. Premi "Continua": si apre Impostazioni di Sistema, accendi l'interruttore accanto a Ormeggio nell'elenco Accessibilità.
+
+        Se Ormeggio non è nell'elenco, premi + in fondo all'elenco, scegli Ormeggio in Applicazioni e premi Apri.
         """
         alert.accessoryView = loginBox
         alert.addButton(withTitle: "Continua")
@@ -305,9 +324,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if loginBox.state == .on {
             do { try SMAppService.mainApp.register() } catch { Log.write("Avvio al login non attivato: \(error.localizedDescription)") }
         }
-        if !WindowManager.isTrusted(prompt: true) {
-            openAccessibilitySettings()
-        }
+        askAccessibility()
         watchPermission()
         scenesWindow.show()
     }

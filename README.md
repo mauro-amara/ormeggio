@@ -36,7 +36,7 @@ Se in fondo a Privacy e sicurezza il pulsante **Apri comunque** non c'è, prova 
 
 **Dai il permesso per spostare le finestre**
 
-7. Si apre il benvenuto di Ormeggio: premi **Continua**. Si apre Impostazioni di Sistema su **Accessibilità**: attiva l'interruttore accanto a **Ormeggio**.
+7. Si apre il benvenuto di Ormeggio: premi **Continua**. Si apre Impostazioni di Sistema su **Accessibilità**: accendi l'interruttore accanto a **Ormeggio**. Se Ormeggio non è nell'elenco, premi **+** in fondo all'elenco, scegli **Ormeggio** nella cartella Applicazioni, premi **Apri** e poi accendi l'interruttore.
 8. Torna a lavorare: l'icona di Ormeggio è nella barra in alto, vicino all'orologio.
 
 macOS chiede altri due permessi quando servono, la prima volta. Per le notifiche degli aggiornamenti premi **Consenti**. Quando salvi una scena con Chrome, Safari o il Finder aperti, macOS chiede se Ormeggio può controllarli: premi **OK**, serve per ritrovare schede e cartelle.
