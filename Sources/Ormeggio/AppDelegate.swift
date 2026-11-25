@@ -16,7 +16,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let updater = Updater()
     private var trustTimer: Timer?
     private var installing = false
-    private var sendingReport = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -219,43 +218,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         updateIcon()
     }
 
-    /// "Invia segnalazione": con l'invio diretto parte cifrata in un secondo; senza, prepara il file per la chat.
+    /// "Prepara segnalazione": un file con la diagnostica, da trascinare nella chat con Claude.
+    /// Resta tutto sul Mac: niente parte da solo verso internet.
     @objc private func sendReport() {
-        guard !sendingReport, !engine.isWorking else { return }
-        sendingReport = true
-        HUD.shared.show(ActivityReport(
-            kind: .working,
-            title: "Invio la segnalazione…",
-            subtitle: "Ci vuole un secondo"
-        ))
-        if ReportSender.hasDirectChannel {
-            // Una al minuto al massimo: un doppio clic non deve mandarne due.
-            if let last = lastReportSent, Date().timeIntervalSince(last) < 60 {
-                sendingReport = false
-                HUD.shared.show(ActivityReport(kind: .success, title: "Segnalazione già inviata",
-                                               subtitle: "L'hai mandata meno di un minuto fa", offersReport: false))
-                return
-            }
-            let report = engine.supportReport(maxCharacters: 60000)
-            Task { @MainActor in
-                let sent = await ReportSender.sendDirect(report: report, version: self.updater.currentVersion)
-                self.sendingReport = false
-                if sent {
-                    self.lastReportSent = Date()
-                    HUD.shared.show(ActivityReport(kind: .success, title: "Segnalazione inviata",
-                                                   subtitle: "Claude la legge prima della prossima versione, che arriva da sola con una notifica"))
-                } else {
-                    // Se l'invio diretto non va, la segnalazione non si perde: preparo il file.
-                    self.prepareReportFile(report, reason: "L'invio diretto non è riuscito")
-                }
-            }
-            return
-        }
-        sendingReport = false
+        guard !engine.isWorking else { return }
         prepareReportFile(engine.supportReport(), reason: nil)
     }
-
-    private var lastReportSent: Date?
 
     /// File pronto e testo negli appunti, da dare a Claude in chat.
     private func prepareReportFile(_ report: String, reason: String?) {
@@ -477,10 +445,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // ── Assistenza
         menu.addItem(.separator())
         menu.addItem(NSMenuItem.sectionHeader(title: "Assistenza"))
-        let reportItem = commandItem(sendingReport ? "Invio la segnalazione…" : "Invia segnalazione", #selector(sendReport),
-                                     icon: "exclamationmark.bubble")
-        reportItem.isEnabled = !sendingReport && !engine.isWorking
-        setSubtitle(reportItem, "Un clic: Claude la legge prima della prossima versione")
+        let reportItem = commandItem("Prepara segnalazione", #selector(sendReport), icon: "exclamationmark.bubble")
+        reportItem.isEnabled = !engine.isWorking
+        setSubtitle(reportItem, "Un file da trascinare nella chat con Claude")
         menu.addItem(reportItem)
 
         // ── Aggiornamenti

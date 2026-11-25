@@ -33,7 +33,7 @@ struct ActivityReport {
     /// Pulsante in fondo al riquadro, per la cosa da fare subito.
     var actionTitle: String?
     var action: (@MainActor () -> Void)?
-    /// Se compare il link "Invia segnalazione" quando qualcosa non va.
+    /// Se compare il link "Prepara segnalazione" quando qualcosa non va.
     var offersReport = true
 }
 
@@ -249,7 +249,7 @@ private struct HUDView: View {
                 Button {
                     onSendDiagnostics()
                 } label: {
-                    Label("Invia segnalazione", systemImage: "exclamationmark.bubble")
+                    Label("Prepara segnalazione", systemImage: "exclamationmark.bubble")
                         .font(.callout)
                 }
                 .buttonStyle(.link)

@@ -59,7 +59,7 @@ Ormeggio controlla ogni mezz'ora se c'è una versione nuova e la installa da sol
 
 ### Se qualcosa non va
 
-Icona di Ormeggio > **Invia segnalazione**. Un clic: la segnalazione parte cifrata in un secondo, senza aprire niente, verso un repository privato. Prima di ogni nuova versione Claude le legge tutte e corregge i problemi; la versione nuova arriva a tutti con la notifica. Se l'invio non riesce (per esempio senza internet), Ormeggio prepara un file e lo mostra nel Finder. La segnalazione contiene il registro delle ultime operazioni e i titoli delle finestre, mai gli indirizzi delle schede.
+Icona di Ormeggio > **Prepara segnalazione**. Ormeggio prepara un file con la diagnostica e lo mostra nel Finder: trascinalo nella chat con Claude. Il file resta sul Mac finché non lo mandi tu. Contiene il registro delle ultime operazioni e i titoli delle finestre, mai gli indirizzi delle schede.
 
 ### Disinstallare
 
@@ -68,10 +68,10 @@ Icona di Ormeggio > Impostazioni > **Disinstalla Ormeggio…**. Toglie l'avvio a
 ## Sicurezza e dati
 
 - **Permessi.** Ormeggio usa l'Accessibilità per spostare le finestre e, se concessa, l'Automazione per leggere schede e cartelle. Non chiede altro: niente registrazione dello schermo, niente accesso ai file.
-- **Dati.** Scene e registro stanno in `~/Library/Application Support/Ormeggio`, leggibili solo dalla persona. Non escono dal Mac, tranne quando la persona preme "Invia segnalazione". Nel registro ci sono i titoli delle finestre e i nomi dei siti, mai gli indirizzi completi delle schede.
+- **Dati.** Scene e registro stanno in `~/Library/Application Support/Ormeggio`, leggibili solo dalla persona. Non escono dal Mac. Nel registro ci sono i titoli delle finestre e i nomi dei siti, mai gli indirizzi completi delle schede.
 - **Aggiornamenti.** Si scaricano solo da questo repository, in HTTPS. Prima di installare, Ormeggio controlla che il file sia identico a quello pubblicato (impronta SHA-256), che contenga proprio Ormeggio nella versione annunciata e che la firma sia intatta. Se un controllo non passa, l'aggiornamento non si installa. La compilazione usa solo git e gli strumenti di Apple, senza azioni di terzi, e fa gli stessi controlli prima di pubblicare.
 - **Limite noto.** L'app è firmata localmente, non con un certificato Developer ID di Apple. La sicurezza degli aggiornamenti dipende quindi dall'account GitHub che pubblica. Il passo successivo è firmare e notarizzare con l'account sviluppatore dell'azienda.
-- **Segnalazioni.** Partono solo quando la persona preme "Invia segnalazione". Sono cifrate sul Mac (X25519 e ChaCha20-Poly1305) e arrivano come issue in un repository privato: solo chi ha la chiave privata le può leggere, e la chiave privata non è nell'app né in questo repository. L'app contiene una chiave di scrittura mascherata che può fare una cosa sola, aprire issue in quel repository: chi la ricavasse dall'app potrebbe al massimo mandare segnalazioni false, che si leggono come dati e non possono cambiare niente da sole.
+- **Segnalazioni.** Niente parte da solo: "Prepara segnalazione" crea un file sul Mac, e la persona decide se e a chi mandarlo. Nell'app non c'è nessuna chiave o password.
 
 ## Cosa fa
 
