@@ -41,9 +41,15 @@ L'icona di Ormeggio compare nella barra in alto, vicino all'orologio.
 
 ### Usare
 
+Il menu ha cinque voci:
+
+- **Vedi le scene…**: finestra con tutte le scene, per richiamarle, rinominarle, eliminarle.
 - **Salva scena…**: sistema il Mac come ti serve, scegli un nome. Puoi chiedere che la scena parta da sola quando ricolleghi gli stessi monitor.
-- **Richiama**: clic sul nome della scena nel menu.
-- **Le tue scene…**: finestra con tutte le scene, per richiamarle, rinominarle, eliminarle.
+- **Richiama scena**: clic sul nome della scena. La scena in uso ha il segno di spunta.
+- **Aggiornamenti**: controlla subito se c'è una versione nuova.
+- **Segnalazioni**: prepara il file da mandare quando qualcosa non va.
+
+Sotto ci sono **Impostazioni** ed **Esci**.
 
 Il salvataggio legge le finestre di tutte le scrivanie senza farle scorrere. Quando richiami una scena, Ormeggio passa solo dalle scrivanie dove deve spostare una finestra: in quei secondi non toccare mouse e tastiera. Un riquadro in basso dice quando ha finito, cosa ha sistemato e cosa no.
 
@@ -51,15 +57,15 @@ La prima volta che salvi con Finder, Chrome o Safari aperti, macOS chiede se Orm
 
 ### Zoom
 
-Lo zoom di Chrome Ormeggio lo salva da solo, sito per sito e profilo per profilo, e lo rimette quando richiami la scena. Chrome scrive lo zoom con qualche secondo di ritardo: Ormeggio lo rilegge 12 secondi dopo il salvataggio e aggiorna la scena. Per le altre app (per esempio Slack): Le tue scene > menu della scena > **Zoom delle app…**, scegli l'ingrandimento di ogni app.
+Lo zoom di Chrome Ormeggio lo salva da solo, sito per sito e profilo per profilo, e lo rimette quando richiami la scena. Chrome scrive lo zoom con qualche secondo di ritardo: Ormeggio lo rilegge 12 secondi dopo il salvataggio e aggiorna la scena. Per le altre app (per esempio Slack): Vedi le scene > menu della scena > **Zoom delle app…**, scegli l'ingrandimento di ogni app.
 
 ### Aggiornamenti
 
-Ormeggio controlla ogni mezz'ora se c'è una versione nuova e la installa da solo: si chiude, si aggiorna e si riapre. Subito dopo arriva una notifica di macOS a ogni persona che lo usa, con le novità. La prima volta macOS chiede se Ormeggio può mandare notifiche: premi **Consenti**. Dal menu di Ormeggio, sezione Aggiornamenti: **Cerca aggiornamenti** per averla subito e **Novità dell'ultima versione** per rileggere le novità.
+Ormeggio controlla ogni mezz'ora se c'è una versione nuova e la installa da solo: si chiude, si aggiorna e si riapre. Subito dopo arriva una notifica di macOS a ogni persona che lo usa, con le novità. La prima volta macOS chiede se Ormeggio può mandare notifiche: premi **Consenti**. Dal menu di Ormeggio: **Aggiornamenti** per averla subito. Le novità si rileggono in **Impostazioni** > **Novità dell'ultima versione**.
 
 ### Se qualcosa non va
 
-Icona di Ormeggio > **Prepara segnalazione**. Ormeggio prepara un file con la diagnostica e lo mostra nel Finder: trascinalo nella chat con Claude. Il file resta sul Mac finché non lo mandi tu. Contiene il registro delle ultime operazioni e i titoli delle finestre, mai gli indirizzi delle schede.
+Icona di Ormeggio > **Segnalazioni**. Ormeggio prepara un file con la diagnostica e lo mostra nel Finder: trascinalo nella chat con Claude. Il file resta sul Mac finché non lo mandi tu. Contiene il registro delle ultime operazioni e i titoli delle finestre, mai gli indirizzi delle schede.
 
 ### Disinstallare
 
@@ -71,7 +77,7 @@ Icona di Ormeggio > Impostazioni > **Disinstalla Ormeggio…**. Toglie l'avvio a
 - **Dati.** Scene e registro stanno in `~/Library/Application Support/Ormeggio`, leggibili solo dalla persona. Non escono dal Mac. Nel registro ci sono i titoli delle finestre e i nomi dei siti, mai gli indirizzi completi delle schede.
 - **Aggiornamenti.** Si scaricano solo da questo repository, in HTTPS. Prima di installare, Ormeggio controlla che il file sia identico a quello pubblicato (impronta SHA-256), che contenga proprio Ormeggio nella versione annunciata e che la firma sia intatta. Se un controllo non passa, l'aggiornamento non si installa. La compilazione usa solo git e gli strumenti di Apple, senza azioni di terzi, e fa gli stessi controlli prima di pubblicare.
 - **Limite noto.** L'app è firmata localmente, non con un certificato Developer ID di Apple. La sicurezza degli aggiornamenti dipende quindi dall'account GitHub che pubblica. Il passo successivo è firmare e notarizzare con l'account sviluppatore dell'azienda.
-- **Segnalazioni.** Niente parte da solo: "Prepara segnalazione" crea un file sul Mac, e la persona decide se e a chi mandarlo. Nell'app non c'è nessuna chiave o password.
+- **Segnalazioni.** Niente parte da solo: "Segnalazioni" crea un file sul Mac, e la persona decide se e a chi mandarlo. Nell'app non c'è nessuna chiave o password.
 
 ## Cosa fa
 

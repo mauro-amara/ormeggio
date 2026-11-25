@@ -351,80 +351,87 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let active = engine.activeScene
         let trusted = WindowManager.isTrusted(prompt: false)
 
-        if let update = updater.available {
-            menu.addItem(commandItem("Aggiorna alla versione \(update.version)…", #selector(installUpdate), icon: "arrow.down.circle.fill"))
-            menu.addItem(.separator())
-        }
-
-        // ── Scena in uso
-        menu.addItem(NSMenuItem.sectionHeader(title: "Scena in uso"))
+        // Il menu ha solo le cinque cose che servono: vedere, salvare e richiamare le scene,
+        // aggiornamenti e segnalazioni. Sotto, Impostazioni ed Esci.
         if engine.isWorking {
             menu.addItem(infoItem("Sto sistemando le finestre…", icon: "hourglass", color: .systemOrange,
                                   subtitle: "Non toccare mouse e tastiera"))
-        } else if let active {
-            var details = [active.fingerprint == fingerprint ? "Questi monitor" : "Altri monitor", "\(active.windows.count) finestre"]
-            if active.autoApply { details.append("si richiama da sola") }
-            menu.addItem(infoItem(active.name, icon: SceneIcons.icon(for: active), color: .systemGreen,
-                                  subtitle: details.joined(separator: " · ")))
-            let again = commandItem("Richiama di nuovo", #selector(recallActive), icon: "arrow.clockwise")
-            again.isEnabled = trusted
-            menu.addItem(again)
-            if engine.manageSpaces {
-                let desktops = commandItem("Sposta ogni finestra sulla sua scrivania", #selector(recallActiveWithDesktops), icon: "square.stack.3d.up")
-                desktops.isEnabled = trusted
-                menu.addItem(desktops)
-            }
-        } else {
-            menu.addItem(infoItem("Nessuna", icon: "moon.zzz"))
+            menu.addItem(.separator())
         }
         if !trusted {
             menu.addItem(commandItem("Ripara il permesso di Accessibilità…", #selector(repairPermissionFromMenu),
                                      icon: "exclamationmark.triangle.fill", color: .systemOrange))
+            menu.addItem(.separator())
         }
 
-        // ── Scene: si vedono subito, un clic e la scena torna.
-        menu.addItem(.separator())
+        // 1. Vedi le scene
+        menu.addItem(commandItem("Vedi le scene…", #selector(showScenes), icon: "square.grid.2x2", key: "o"))
+
+        // 2. Salva scena
+        let saveItem = commandItem("Salva scena…", #selector(saveSceneFromMenu), icon: "plus.circle", key: "s")
+        saveItem.isEnabled = !engine.isWorking
+        menu.addItem(saveItem)
+
+        // 3. Richiama scena: l'elenco, con il segno su quella in uso
         let scenes = store.scenes.sorted { lhs, rhs in
             let lhsHere = lhs.fingerprint == fingerprint
             let rhsHere = rhs.fingerprint == fingerprint
             if lhsHere != rhsHere { return lhsHere }
             return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
         }
-        let mixed = Set(scenes.map { $0.fingerprint == fingerprint }).count > 1
+        let recallMenu = NSMenu()
+        recallMenu.autoenablesItems = false
         if scenes.isEmpty {
-            menu.addItem(NSMenuItem.sectionHeader(title: "Scene"))
-            menu.addItem(infoItem("Nessuna scena salvata", icon: "tray"))
+            recallMenu.addItem(infoItem("Nessuna scena salvata", icon: "tray"))
         } else {
+            let mixed = Set(scenes.map { $0.fingerprint == fingerprint }).count > 1
             var lastHere: Bool?
             for (offset, scene) in scenes.enumerated() {
                 let here = scene.fingerprint == fingerprint
-                if here != lastHere {
-                    let title = !mixed ? "Scene" : (here ? "Scene per questi monitor" : "Scene per altri monitor")
-                    menu.addItem(NSMenuItem.sectionHeader(title: title))
-                    lastHere = here
+                if mixed, here != lastHere {
+                    if lastHere != nil { recallMenu.addItem(.separator()) }
+                    recallMenu.addItem(NSMenuItem.sectionHeader(title: here ? "Per questi monitor" : "Per altri monitor"))
                 }
+                lastHere = here
                 let key = offset < 9 ? "\(offset + 1)" : ""
                 let item = commandItem(scene.name, #selector(recallScene(_:)), icon: SceneIcons.icon(for: scene), key: key)
                 item.representedObject = scene.id.uuidString
                 item.state = scene.id == active?.id ? .on : .off
                 item.isEnabled = !engine.isWorking && trusted
-                menu.addItem(item)
+                recallMenu.addItem(item)
+            }
+            if active != nil, engine.manageSpaces {
+                recallMenu.addItem(.separator())
+                let desktops = commandItem("Sposta ogni finestra sulla sua scrivania", #selector(recallActiveWithDesktops), icon: "square.stack.3d.up")
+                desktops.isEnabled = !engine.isWorking && trusted
+                recallMenu.addItem(desktops)
             }
         }
-        let saveItem = commandItem("Salva scena…", #selector(saveSceneFromMenu), icon: "plus.circle", key: "s")
-        saveItem.isEnabled = !engine.isWorking
-        menu.addItem(saveItem)
-        menu.addItem(commandItem("Gestisci le scene…", #selector(showScenes), icon: "square.grid.2x2", key: "o"))
+        let recallItem = NSMenuItem(title: "Richiama scena", action: nil, keyEquivalent: "")
+        recallItem.image = symbol("rectangle.stack")
+        if let active { setSubtitle(recallItem, "In uso: \(active.name)") }
+        recallItem.submenu = recallMenu
+        menu.addItem(recallItem)
 
-        // ── Aggiornamenti e assistenza
+        // 4. Aggiornamenti: se c'è una versione nuova la installa, altrimenti controlla
         menu.addItem(.separator())
-        let checkItem = commandItem("Cerca aggiornamenti", #selector(checkForUpdates), icon: "arrow.triangle.2.circlepath")
-        setSubtitle(checkItem, "Versione \(updater.currentVersion)")
-        menu.addItem(checkItem)
-        let reportItem = commandItem("Prepara segnalazione", #selector(sendReport), icon: "exclamationmark.bubble")
+        if let update = updater.available {
+            let updateItem = commandItem("Aggiornamenti", #selector(installUpdate), icon: "arrow.down.circle.fill", color: .systemBlue)
+            setSubtitle(updateItem, "Pronta la versione \(update.version): clic per installarla")
+            menu.addItem(updateItem)
+        } else {
+            let checkItem = commandItem("Aggiornamenti", #selector(checkForUpdates), icon: "arrow.triangle.2.circlepath")
+            setSubtitle(checkItem, "Versione \(updater.currentVersion)")
+            menu.addItem(checkItem)
+        }
+
+        // 5. Segnalazioni
+        let reportItem = commandItem("Segnalazioni", #selector(sendReport), icon: "exclamationmark.bubble")
+        setSubtitle(reportItem, "Prepara il file da mandare")
         reportItem.isEnabled = !engine.isWorking
         menu.addItem(reportItem)
 
+        menu.addItem(.separator())
         // ── Impostazioni: tutto quello che serve di rado
         let settingsMenu = NSMenu()
         settingsMenu.autoenablesItems = false
@@ -465,8 +472,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         settingsItem.image = symbol("gearshape")
         settingsItem.submenu = settingsMenu
         menu.addItem(settingsItem)
-
-        menu.addItem(.separator())
         menu.addItem(commandItem("Esci da Ormeggio", #selector(quit), icon: "xmark.circle", key: "q"))
     }
 
