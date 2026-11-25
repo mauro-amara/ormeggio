@@ -16,26 +16,20 @@ Ormeggio è un'app gratuita per la barra dei menu. Sistemi il Mac come ti serve 
 
 ### Installare
 
-1. Scarica l'ultima versione dal ramo [`builds`](https://github.com/mauro-amara/ormeggio/tree/builds) (file `Ormeggio-<versione>.dmg`), aprila e trascina **Ormeggio** su **Applicazioni**.
-2. Apri Ormeggio da Applicazioni. Se macOS dice che non può verificare lo sviluppatore: Impostazioni di Sistema > Privacy e sicurezza, in fondo premi **Apri comunque**.
-3. Nella finestra di benvenuto premi **Continua** e attiva Ormeggio nell'elenco **Accessibilità**.
+Il modo più semplice, senza avvisi di macOS:
 
-In alternativa, questo comando nel Terminale scarica e installa l'ultima versione, senza gli avvisi di macOS:
+1. Apri **Terminale** (Applicazioni > Utility > Terminale).
+2. Incolla questa riga e premi Invio:
 
 ```sh
-mkdir -p /tmp/ormeggio-dmg && \
-curl -fsSL https://raw.githubusercontent.com/mauro-amara/ormeggio/builds/latest.json -o /tmp/ormeggio.json && \
-DMG=$(plutil -extract dmg raw -o - /tmp/ormeggio.json) && \
-curl -fL "https://raw.githubusercontent.com/mauro-amara/ormeggio/builds/$DMG" -o /tmp/Ormeggio.dmg && \
-echo "$(plutil -extract sha256 raw -o - /tmp/ormeggio.json)  /tmp/Ormeggio.dmg" | shasum -a 256 -c - && \
-hdiutil attach /tmp/Ormeggio.dmg -nobrowse -readonly -mountpoint /tmp/ormeggio-dmg && \
-(pkill -x Ormeggio || true) && sleep 1 && \
-rm -rf /Applications/Ormeggio.app && \
-ditto /tmp/ormeggio-dmg/Ormeggio.app /Applications/Ormeggio.app && \
-hdiutil detach /tmp/ormeggio-dmg && \
-xattr -dr com.apple.quarantine /Applications/Ormeggio.app && \
-open /Applications/Ormeggio.app
+curl -fsSL https://raw.githubusercontent.com/mauro-amara/ormeggio/main/install.sh | sh
 ```
+
+3. Ormeggio si apre da solo. Nella finestra di benvenuto premi **Continua**: si apre Impostazioni di Sistema, attiva Ormeggio nell'elenco **Accessibilità**.
+
+Lo script ([install.sh](install.sh)) scarica l'ultima versione, controlla impronta, identificativo e firma, la copia in Applicazioni e la apre. Non chiede password. Serve anche per reinstallare.
+
+In alternativa scarica il file `Ormeggio-<versione>.dmg` dal ramo [`builds`](https://github.com/mauro-amara/ormeggio/tree/builds) e trascina **Ormeggio** su **Applicazioni**. Scaricata dal browser, macOS la blocca finché non premi **Apri comunque** in Impostazioni di Sistema > Privacy e sicurezza: Ormeggio non è ancora autenticata da Apple.
 
 L'icona di Ormeggio compare nella barra in alto, vicino all'orologio.
 

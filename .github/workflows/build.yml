@@ -3,6 +3,8 @@ name: Compila Ormeggio
 on:
   push:
     branches: [main]
+    # Testi e script di installazione non cambiano l'app: niente nuova compilazione.
+    paths-ignore: ['README.md', 'CLAUDE.md', 'install.sh']
   workflow_dispatch:
 
 permissions:
