@@ -87,8 +87,12 @@ enum FinderBridge {
         // Non controllo la cartella prima: per quelle in Scrivania o Documenti macOS chiederebbe un permesso.
         // La apre il Finder, che può.
         // Mostro la cartella nel Finder: così non apro mai un'app o un documento che si trovasse a quel percorso.
-        if !NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: path) {
-            Log.write("Cartella non aperta: \(path)")
+        // In un altro thread: se il Finder è lento a rispondere (per esempio su una cartella nel cloud
+        // subito dopo un cambio di monitor) il richiamo non resta fermo ad aspettarlo.
+        DispatchQueue.global(qos: .userInitiated).async {
+            if !NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: path) {
+                Task { @MainActor in Log.write("Cartella non aperta: \(path)") }
+            }
         }
     }
 }

@@ -996,6 +996,42 @@ final class Engine {
             }
         }
 
+        // 6a-bis. Finestre della scena ancora aperte che l'inventario non vede: di solito ridotte nel Dock
+        //         mentre i monitor cambiavano. Le riprendo per numero invece di riaprirle: niente doppioni.
+        var recoveredFromDock: [String] = []
+        if !unmatched.isEmpty {
+            var alive: [CGWindowID: pid_t] = [:]
+            for system in WindowManager.systemWindows() where alive[system.id] == nil { alive[system.id] = system.pid }
+            var recovered: [SavedWindow] = []
+            var rest: [SavedWindow] = []
+            for saved in unmatched {
+                guard let id = saved.windowID, let pid = alive[id], ghostWindows[id] == nil,
+                      NSRunningApplication(processIdentifier: pid)?.bundleIdentifier == saved.bundleID,
+                      let element = elementsOnAllDesktops(pid: pid)[id] else {
+                    rest.append(saved)
+                    continue
+                }
+                if WindowManager.boolAttribute(element, kAXMinimizedAttribute) == true {
+                    WindowManager.setMinimized(element, false)
+                    recoveredFromDock.append(windowName(saved, profiles: profiles))
+                }
+                recovered.append(saved)
+            }
+            if !recovered.isEmpty {
+                await Input.pause(0.5)
+                var fresh = inventory(displays: displays, profiles: profiles, excluding: known)
+                if usesChrome { Engine.attachChromeTabs(&fresh, profiles: profiles) }
+                let found = match(recovered, with: fresh, strict: false)
+                var more = found.assignments
+                for index in more.indices { more[index].needsFrame = true }
+                known.formUnion(more.compactMap(\.tracked.windowID))
+                assignments += more
+                Log.write("Finestre della scena ritrovate senza riaprirle: " + more.map { "\($0.saved.appName) \"\($0.saved.title)\"" }.joined(separator: ", "))
+                rest += found.unmatched
+            }
+            unmatched = rest
+        }
+
         // 6b. Finestre da riaprire: cartelle, documenti, finestre del browser con le schede.
         //     Mai un doppione: se le schede di una finestra di Chrome sono già aperte in un'altra finestra
         //     dello stesso profilo (anche su un'altra scrivania o nel Dock), non la riapro.
@@ -1039,7 +1075,7 @@ final class Engine {
         // 7. Finestre ridotte nel Dock: tornano tutte su (anche se al salvataggio erano nel Dock).
         //    Finestre a tutto schermo che nella scena non lo erano: tornano normali.
         var stateChanged = false
-        var restoredFromDock: [String] = []
+        var restoredFromDock: [String] = recoveredFromDock
         for index in assignments.indices {
             if assignments[index].tracked.live == nil, let id = assignments[index].tracked.windowID {
                 assignments[index].tracked.live = WindowManager.resolve(windowID: id, pid: assignments[index].tracked.pid)
