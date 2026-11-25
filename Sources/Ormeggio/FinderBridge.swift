@@ -83,6 +83,18 @@ enum FinderBridge {
     }
 
     /// Apre la cartella in una finestra del Finder.
+    /// Cartella su un disco esterno che adesso non c'è o che è solo in lettura, come il DMG di un'installazione.
+    /// Sono finestre di passaggio: non le salvo in una scena e non provo a riaprirle.
+    static func isTemporaryVolume(_ path: String) -> Bool {
+        guard path.hasPrefix("/Volumes/") else { return false }
+        let parts = path.split(separator: "/", omittingEmptySubsequences: true)
+        guard parts.count >= 2 else { return false }
+        let root = URL(fileURLWithPath: "/Volumes/" + parts[1], isDirectory: true)
+        guard FileManager.default.fileExists(atPath: root.path) else { return true }
+        let values = try? root.resourceValues(forKeys: [.volumeIsReadOnlyKey])
+        return values?.volumeIsReadOnly == true
+    }
+
     static func open(folder path: String) {
         // Non controllo la cartella prima: per quelle in Scrivania o Documenti macOS chiederebbe un permesso.
         // La apre il Finder, che può.

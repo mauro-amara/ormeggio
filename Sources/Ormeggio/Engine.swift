@@ -474,6 +474,10 @@ final class Engine {
             default:
                 break
             }
+            if item.bundleID == FinderBridge.bundleID, let path = saved.folderPath, FinderBridge.isTemporaryVolume(path) {
+                Log.write("Non salvo la finestra del Finder \"\(saved.title)\": è un disco di passaggio (per esempio un'installazione)")
+                continue
+            }
             windows.append(saved)
         }
 
@@ -607,7 +611,7 @@ final class Engine {
                 }
                 if detectGhosts, strict, !visibleSpaces.contains(spaces[0]) {
                     let remote = remoteWindows(pid: app.processIdentifier)
-                    if remote.complete && remote.elements[system.id] == nil {
+                    if remote.complete && !remote.elements.isEmpty && remote.elements[system.id] == nil {
                         ghosts[system.id] = name
                         continue
                     }
@@ -1741,6 +1745,11 @@ final class Engine {
     /// Riapre una finestra che manca. Restituisce true se ha aperto qualcosa.
     private func reopen(_ saved: SavedWindow) -> Bool {
         if let path = saved.folderPath {
+            // Un disco che non c'è più (per esempio il DMG di un'installazione): non c'è niente da riaprire.
+            if FinderBridge.isTemporaryVolume(path) {
+                Log.write("Non riapro \"\(saved.title)\": il disco non è più collegato")
+                return false
+            }
             FinderBridge.open(folder: path)
             return true
         }

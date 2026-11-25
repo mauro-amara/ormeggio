@@ -559,7 +559,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         nameField.placeholderString = "Per esempio: Ufficio 1"
         let autoBox = NSButton(checkboxWithTitle: "Richiamala da sola quando ritrovo questi monitor", target: nil, action: nil)
         autoBox.frame = NSRect(x: 0, y: 0, width: 340, height: 22)
-        autoBox.state = (engine.activeScene?.autoApply ?? false) ? .on : .off
+        autoBox.state = (engine.activeScene?.autoApply ?? true) ? .on : .off
         let container = NSView(frame: NSRect(x: 0, y: 0, width: 340, height: 56))
         container.addSubview(nameField)
         container.addSubview(autoBox)
