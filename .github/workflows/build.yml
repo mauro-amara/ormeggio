@@ -85,3 +85,35 @@ jobs:
           git add .
           git commit -qm "Build ${GITHUB_SHA::7}: ${{ job.status }}"
           git push -q -f "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$BRANCH"
+
+      # Ogni versione anche come "Release" di GitHub, con il file Ormeggio.dmg: GitHub conta quante volte
+      # viene scaricato. Il link "releases/latest/download/Ormeggio.dmg" porta sempre all'ultima.
+      - name: Pubblica la versione su Releases
+        if: success()
+        shell: bash
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" Resources/Info.plist)
+          TAG="v$VERSION"
+          DMG="dist/Ormeggio-$VERSION.dmg"
+          SHA=$(shasum -a 256 "$DMG" | cut -d' ' -f1)
+          API="https://api.github.com/repos/${GITHUB_REPOSITORY}"
+          AUTH=(-H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.github+json")
+          git log -1 --pretty=%B | grep -v -E '^(Co-Authored-By|Claude-Session)' > notes.txt
+          printf '\nImpronta SHA-256 di Ormeggio.dmg: %s\n' "$SHA" >> notes.txt
+          EXISTING=$(curl -fsS "${AUTH[@]}" "$API/releases/tags/$TAG" || true)
+          ID=$(printf '%s' "$EXISTING" | python3 -c 'import json,sys; d=sys.stdin.read().strip(); print(json.loads(d).get("id","") if d else "")')
+          if [ -z "$ID" ]; then
+            BODY=$(python3 -c 'import json,sys; print(json.dumps({"tag_name": sys.argv[1], "target_commitish": sys.argv[2], "name": "Ormeggio " + sys.argv[3], "body": open("notes.txt").read()}))' "$TAG" "$GITHUB_SHA" "$VERSION")
+            ID=$(curl -fsS "${AUTH[@]}" -X POST "$API/releases" -d "$BODY" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+          else
+            # Stessa versione ricompilata: tolgo il file vecchio prima di mettere quello nuovo.
+            for ASSET in $(printf '%s' "$EXISTING" | python3 -c 'import json,sys; print(" ".join(str(a["id"]) for a in json.load(sys.stdin).get("assets", []) if a["name"] == "Ormeggio.dmg"))'); do
+              curl -fsS "${AUTH[@]}" -X DELETE "$API/releases/assets/$ASSET"
+            done
+          fi
+          curl -fsS "${AUTH[@]}" -H "Content-Type: application/octet-stream" --data-binary @"$DMG" \
+            "https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/$ID/assets?name=Ormeggio.dmg" > /dev/null
+          echo "Release $TAG pubblicata con Ormeggio.dmg"

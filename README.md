@@ -2,7 +2,7 @@
 
 App gratuita per Mac che salva e richiama la disposizione delle tue finestre: ogni app sul suo monitor, sulla sua scrivania, alla sua misura. Con un clic, o da sola quando ricolleghi il monitor.
 
-**[Scarica Ormeggio](https://github.com/mauro-amara/ormeggio/raw/builds/Ormeggio.dmg)** · gratis · macOS 14 o successivo · Mac con processore Apple o Intel
+**[Scarica Ormeggio](https://github.com/mauro-amara/ormeggio/releases/latest/download/Ormeggio.dmg)** · gratis · macOS 14 o successivo · Mac con processore Apple o Intel
 
 ## Il problema
 
@@ -20,7 +20,7 @@ Tutto resta sul tuo Mac: niente account, niente dati che escono.
 
 Ci vogliono un paio di minuti.
 
-1. Scarica **[Ormeggio.dmg](https://github.com/mauro-amara/ormeggio/raw/builds/Ormeggio.dmg)**. Il link scarica sempre l'ultima versione.
+1. Scarica **[Ormeggio.dmg](https://github.com/mauro-amara/ormeggio/releases/latest/download/Ormeggio.dmg)**. Il link scarica sempre l'ultima versione.
 2. Apri il file scaricato con un doppio clic. Si apre una finestra con l'icona di Ormeggio e la cartella Applicazioni.
 3. Trascina l'icona di **Ormeggio** sulla cartella **Applicazioni**.
 4. Apri la cartella Applicazioni (nel Finder, a sinistra) e apri **Ormeggio** con un doppio clic.
