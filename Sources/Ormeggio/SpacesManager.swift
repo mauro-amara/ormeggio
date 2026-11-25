@@ -213,8 +213,8 @@ enum SpacesManager {
 
     // MARK: Aggiungere e togliere scrivanie (Mission Control)
 
-    /// Porta ogni monitor al numero di scrivanie richiesto. Toglie scrivanie solo dalla fine
-    /// e solo se sul monitor non ci sono app a tutto schermo. Controlla il risultato e riprova una volta.
+    /// Porta ogni monitor al numero di scrivanie richiesto. Toglie solo scrivanie vuote, prima in fondo
+    /// e poi in mezzo, e solo se sul monitor non ci sono app a tutto schermo. Controlla il risultato e riprova una volta.
     /// Con allowRemove falso aggiunge soltanto. Toglie solo le scrivanie in più che sono vuote:
     /// togliere una scrivania con finestre le butterebbe su un'altra e farebbe confusione.
     static func adjustSpaces(wanted: [CGDirectDisplayID: Int], displays: [LiveDisplay], allowRemove: Bool,
@@ -335,19 +335,20 @@ enum SpacesManager {
                         Log.write("Scrivanie di \(display.name) in Mission Control: \(buttons.count), attese \(userCount)")
                         continue
                     }
-                    // Solo le scrivanie oltre quelle della scena, e solo se vuote.
-                    let keep = userCount - count
+                    // Solo scrivanie vuote, quante ne servono. Parto dalla fine: prima quelle vuote in fondo,
+                    // poi quelle vuote rimaste in mezzo. Quelle con finestre restano dove sono.
                     let spaceIDs = current[display.id]?.spaceIDs ?? []
                     let occupied = occupiedSpaces(ignoring: ghosts)
                     var removable: [AXUIElement] = []
-                    for (position, button) in buttons.enumerated() where position >= keep {
-                        if let id = spaceIDs[safe: position], occupied.contains(id) {
-                            Log.write("Scrivania \(position + 1) di \(display.name): ha delle finestre, non la tolgo")
-                            continue
-                        }
+                    for (position, button) in buttons.enumerated().reversed() where removable.count < count {
+                        guard let id = spaceIDs[safe: position], !occupied.contains(id) else { continue }
+                        Log.write("Scrivania \(position + 1) di \(display.name): vuota e in più, la tolgo")
                         removable.append(button)
                     }
-                    for button in removable.reversed() {
+                    if removable.count < count {
+                        Log.write("Su \(display.name) restano \(count - removable.count) scrivanie in più: hanno delle finestre")
+                    }
+                    for button in removable {
                         guard let action = removeAction(of: button) else {
                             Log.write("Azione per togliere la scrivania non trovata")
                             break

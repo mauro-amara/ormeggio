@@ -604,6 +604,7 @@ final class Engine {
 
     /// Riepilogo a schermo dopo il salvataggio, in parole semplici.
     private func reportSaved(_ scene: SavedScene) {
+        let scene = scene.withoutEmptyDesktops()
         var lines: [ActivityReport.Line] = []
         let windows = scene.windows.count
         let apps = Set(scene.windows.map(\.bundleID)).count
@@ -726,6 +727,11 @@ final class Engine {
     /// mezzo secondo per ogni cambio di scrivania. Parte solo se la persona lo chiede dal riquadro.
     func apply(_ scene: SavedScene, thorough: Bool = false) async {
         var scene = scene
+        // Le finestre fantasma già note non contano, neanche per decidere quante scrivanie servono.
+        let knownGhosts = Set(ghostWindows.keys)
+        scene.windows.removeAll { $0.windowID.map { knownGhosts.contains($0) } ?? false }
+        // Le scrivanie vuote della scena non si ricreano: se ci sono e sono vuote, si tolgono.
+        scene = scene.withoutEmptyDesktops()
         guard !isBusy else { return }
         guard WindowManager.isTrusted(prompt: false) else {
             Log.write("Scena \"\(scene.name)\" non richiamata: manca il permesso di Accessibilità")
@@ -805,7 +811,9 @@ final class Engine {
             spacesWanted = wanted
             spacesBefore = SpacesManager.layouts(for: displays)
             if !wanted.isEmpty {
-                _ = await SpacesManager.adjustSpaces(wanted: wanted, displays: displays, allowRemove: false)
+                // Aggiunge quelle che mancano e toglie subito quelle in più già vuote, anche in mezzo.
+                _ = await SpacesManager.adjustSpaces(wanted: wanted, displays: displays, allowRemove: true,
+                                                     ignoring: knownGhosts)
             }
         }
         clock.mark("scrivanie")
@@ -884,6 +892,13 @@ final class Engine {
         if !ghostsInScene.isEmpty {
             scene.windows.removeAll { $0.windowID.map { ghostIDs.contains($0) } ?? false }
             Log.write("Nella scena ci sono finestre fantasma, le salto: " + ghostsInScene.map(\.appName).joined(separator: ", "))
+            // Senza i fantasmi possono servire meno scrivanie: quelle in più, se vuote, le tolgo alla fine.
+            scene = scene.withoutEmptyDesktops()
+            for saved in scene.displays {
+                guard !spacesWanted.isEmpty, let count = saved.spaceCount,
+                      let live = displays.first(where: { $0.key == saved.key }) else { continue }
+                spacesWanted[live.id] = count
+            }
         }
         clock.mark("inventario")
 
@@ -1302,6 +1317,8 @@ final class Engine {
         for assignment in assignments {
             if let id = assignment.tracked.windowID { sceneIDs.insert(id) }
             if let desktop = assignment.saved.desktop { sceneDesktops.insert("\(assignment.saved.displayKey)#\(desktop)") }
+            // Anche la scrivania dove la finestra è davvero: conta quando c'è ancora una scrivania vuota in mezzo.
+            if let desktop = assignment.tracked.desktop { sceneDesktops.insert("\(assignment.tracked.displayKey)#\(desktop)") }
         }
         guard !sceneDesktops.isEmpty else { return [] }
         let profiles = BrowserBridge.chromeProfiles()
