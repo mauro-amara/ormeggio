@@ -23,6 +23,13 @@ enum SpacesManager {
     private typealias CopyManagedDisplaySpacesFn = @convention(c) (Int32) -> Unmanaged<CFArray>?
     private typealias CopySpacesForWindowsFn = @convention(c) (Int32, Int32, CFArray) -> Unmanaged<CFArray>?
     private typealias CreateUUIDFn = @convention(c) (UInt32) -> Unmanaged<CFUUID>?
+    private typealias SpaceSetCompatIDFn = @convention(c) (Int32, UInt64, Int32) -> Int32
+    private typealias SetWindowListWorkspaceFn = @convention(c) (Int32, UnsafePointer<UInt32>, Int32, Int32) -> Int32
+
+    /// Spostamento istantaneo tra scrivanie: nil finché non l'ho provato, poi se funziona su questo Mac.
+    private(set) static var instantMovesWork: Bool?
+    /// Il trascinamento tra scrivanie non ha funzionato in questo richiamo: non lo riprovo con le altre finestre.
+    static var dragFailed = false
 
     private static let skyLight = dlopen("/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight", RTLD_LAZY)
 
@@ -104,6 +111,41 @@ enum SpacesManager {
 
     // MARK: Spostarsi tra le scrivanie
 
+    /// Manda una finestra su un'altra scrivania senza mostrarla e senza trascinarla, con funzioni private
+    /// di macOS: do un numero provvisorio alla scrivania di arrivo, ci mando la finestra, tolgo il numero.
+    /// Controlla che la finestra sia arrivata. Se la prima volta non funziona, su questo Mac non lo riprova.
+    static func sendWindow(_ windowID: CGWindowID, toSpace spaceID: Int) async -> Bool {
+        if instantMovesWork == false { return false }
+        if spaceIDs(forWindow: windowID).contains(spaceID) { return true }
+        guard let connection = connection(),
+              let compatPointer = symbol("SLSSpaceSetCompatID") ?? symbol("CGSSpaceSetCompatID"),
+              let workspacePointer = symbol("SLSSetWindowListWorkspace") ?? symbol("CGSSetWindowListWorkspace") else {
+            Log.write("Spostamento istantaneo tra scrivanie: funzioni di macOS non trovate")
+            instantMovesWork = false
+            return false
+        }
+        let setCompat = unsafeBitCast(compatPointer, to: SpaceSetCompatIDFn.self)
+        let setWorkspace = unsafeBitCast(workspacePointer, to: SetWindowListWorkspaceFn.self)
+        let tag: Int32 = 0x4F52_4D47
+        let ids: [UInt32] = [windowID]
+        _ = setCompat(connection, UInt64(spaceID), tag)
+        _ = ids.withUnsafeBufferPointer { buffer in setWorkspace(connection, buffer.baseAddress!, 1, tag) }
+        _ = setCompat(connection, UInt64(spaceID), 0)
+        var arrived = false
+        for _ in 0..<10 {
+            if spaceIDs(forWindow: windowID).contains(spaceID) {
+                arrived = true
+                break
+            }
+            await Input.pause(0.1)
+        }
+        if instantMovesWork == nil {
+            instantMovesWork = arrived
+            Log.write("Spostamento istantaneo tra scrivanie: " + (arrived ? "funziona su questo Mac" : "non funziona su questo Mac, resta il trascinamento"))
+        }
+        return arrived
+    }
+
     /// Porta il monitor sulla scrivania indicata (da 0) con ctrl + freccia.
     /// Porta un monitor sulla scrivania indicata (da 0), un passo alla volta con ctrl + freccia.
     /// Dopo ogni passo aspetta che macOS confermi il cambio: leggere la posizione durante l'animazione
@@ -164,6 +206,10 @@ enum SpacesManager {
         if current == targetIndex { return true }
         guard let windowID = window.windowID else { return false }
         let targetSpace = layout.spaceIDs[targetIndex]
+        if dragFailed {
+            Log.write("\"\(window.title)\": il trascinamento non ha funzionato con un'altra finestra, non lo riprovo")
+            return false
+        }
 
         WindowManager.raise(window)
         await Input.pause(0.4)
@@ -178,7 +224,7 @@ enum SpacesManager {
                 Log.write("   punto \(Int(point.x)),\(Int(point.y)) scartato (\(WindowManager.roleAt(point)))")
             }
         }
-        for (attempt, point) in points.prefix(3).enumerated() {
+        for (attempt, point) in points.prefix(2).enumerated() {
             if attempt > 0 {
                 _ = await switchDesktop(on: display, to: current, displays: displays)
                 WindowManager.raise(window)
@@ -208,6 +254,7 @@ enum SpacesManager {
             Log.write("   tentativo \(attempt + 1) dal punto \(Int(point.x)),\(Int(point.y)) (\(role)): " + (moved ? "spostata" : "NON spostata, spazi \(spaces)"))
             if moved { return true }
         }
+        dragFailed = true
         return false
     }
 
@@ -224,6 +271,10 @@ enum SpacesManager {
         var added = 0
         var removed = 0
         for attempt in 1...2 {
+            guard DisplayManager.fingerprint(DisplayManager.activeDisplays()) == DisplayManager.fingerprint(displays) else {
+                Log.write("Monitor cambiati: non tocco le scrivanie")
+                break
+            }
             let current = layouts(for: displays)
             var toAdd: [CGDirectDisplayID: Int] = [:]
             var toRemove: [CGDirectDisplayID: Int] = [:]
@@ -288,6 +339,13 @@ enum SpacesManager {
         await Input.pause(0.5)
         groups = displayGroups(in: dockElement)
         Log.write("Mission Control: \(groups.count) monitor riconosciuti (\(groups.keys.map { "\($0)" }.joined(separator: ", ")))")
+        // Un monitor che non mi aspettavo vuol dire che i monitor sono cambiati: non tocco niente.
+        if groups.keys.contains(where: { id in !displays.contains(where: { $0.id == id }) }) {
+            Log.write("Mission Control mostra un monitor che non mi aspettavo: non tocco le scrivanie")
+            toggleMissionControl()
+            await Input.pause(0.6)
+            return (0, 0)
+        }
 
         var added = 0
         var removed = 0

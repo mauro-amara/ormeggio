@@ -74,7 +74,16 @@ final class Engine {
     }
 
     private var lastFingerprint: String?
-    private var isBusy = false
+    private var isBusy = false {
+        didSet {
+            // Se i monitor sono cambiati mentre lavoravo, ora rimetto la scena giusta per quelli nuovi.
+            if oldValue, !isBusy, recheckWhenIdle {
+                recheckWhenIdle = false
+                scheduleCheck(reason: "monitor cambiati mentre lavoravo", delay: 1)
+            }
+        }
+    }
+    private var recheckWhenIdle = false
     /// Finestre delle altre scrivanie lette durante un richiamo: la lettura costa, la faccio una volta per app.
     private var remoteCache: [pid_t: (elements: [CGWindowID: AXUIElement], complete: Bool)] = [:]
 
@@ -186,6 +195,10 @@ final class Engine {
             if activeSceneID == nil, let scene = store.autoScene(for: fingerprint) { activeSceneID = scene.id }
             refreshState()
             return
+        }
+        if isBusy, fingerprint != previous {
+            recheckWhenIdle = true
+            Log.write("Monitor cambiati mentre lavoro: ci penso appena ho finito")
         }
         guard fingerprint != previous, !isBusy else {
             refreshState()
@@ -755,6 +768,7 @@ final class Engine {
         let clock = StepClock()
         remoteCache = [:]
         Log.write("Richiamo la scena \"\(scene.name)\"" + (thorough ? " (completo, con le scrivanie)" : " (veloce)"))
+        SpacesManager.dragFailed = false
 
         // 1. Scala dei monitor
         var displays = DisplayManager.activeDisplays()
@@ -785,6 +799,26 @@ final class Engine {
             displays = DisplayManager.activeDisplays()
         }
         clock.mark("scala")
+
+        // Se durante il richiamo si collega o si stacca un monitor mi fermo: la scena non vale più
+        // per i monitor nuovi, e continuare sposterebbe finestre e scrivanie nel posto sbagliato.
+        let startPrint = DisplayManager.fingerprint(displays)
+        func monitorsMoved() -> Bool {
+            DisplayManager.fingerprint(DisplayManager.activeDisplays()) != startPrint
+        }
+        func stopForMonitors() {
+            Log.write("Monitor cambiati durante il richiamo di \"\(scene.name)\": mi fermo")
+            Input.moveMouse(to: mouse)
+            remoteCache = [:]
+            recheckWhenIdle = true
+            onActivity?(ActivityReport(
+                kind: .working,
+                title: "Monitor cambiati: mi fermo",
+                subtitle: "Aspetto che macOS finisca e rimetto la scena di questi monitor"
+            ))
+            isBusy = false
+            refreshState()
+        }
 
         // 2. Scrivanie: fanno parte della scena, anche quelle vuote. Quelle che mancano le ricreo,
         //    quelle in più le tolgo. Le aggiunte vanno in fondo, e tolgo solo quelle oltre il numero
@@ -875,6 +909,8 @@ final class Engine {
             notes.append(.init(text: "Ho aperto " + Engine.shortList(launchedNames)))
         }
         clock.mark("app")
+
+        if monitorsMoved() { stopForMonitors(); return }
 
         // 4. Dove sono adesso le finestre (senza cambiare scrivania)
         let usesChrome = scene.windows.contains { $0.bundleID == BrowserBridge.chromeID }
@@ -992,8 +1028,11 @@ final class Engine {
 
         clock.mark("dal Dock")
 
+        if monitorsMoved() { stopForMonitors(); return }
+
         // 8. Monitor e scrivania giusti. Nel richiamo veloce solo gli spostamenti istantanei.
         await relocate(&assignments, scene: scene, displays: displays, thorough: thorough)
+        if monitorsMoved() { stopForMonitors(); return }
         if thorough, !spacesWanted.isEmpty {
             // Ora che le finestre della scena sono al loro posto tolgo le scrivanie in più, anche con finestre:
             // quelle finestre non sono della scena e macOS le sposta su un'altra scrivania.
@@ -1009,6 +1048,8 @@ final class Engine {
                 "\($0.saved.appName) (voluta \($0.saved.desktop ?? 0), attuale \($0.tracked.desktop ?? 0))"
             }.joined(separator: ", "))
         }
+
+        if monitorsMoved() { stopForMonitors(); return }
 
         // 9. Posizione e dimensione
         await placeFrames(&assignments, scene: scene, displays: displays, thorough: thorough)
@@ -1603,11 +1644,23 @@ final class Engine {
     private func relocate(_ assignments: inout [Assignment], scene: SavedScene, displays: [LiveDisplay], thorough: Bool) async {
         // Richiamo completo con più monitor: prima a gruppi, un cambio di scrivania per gruppo.
         // Il giro una finestra alla volta qui sotto resta per quelle che non sono arrivate.
+        let fallback = displays.first(where: \.isBuiltin) ?? displays.first
+        let useDesktops = manageSpaces && SpacesManager.isAvailable
+        // Prima provo a mandare ogni finestra sulla sua scrivania senza farla vedere: è istantaneo.
+        // Quelle che non arrivano così le sposta il richiamo completo, come prima.
+        if thorough, useDesktops {
+            for index in assignments.indices {
+                guard let target = displays.first(where: { $0.key == assignments[index].saved.displayKey }) ?? fallback,
+                      let wanted = assignments[index].saved.desktop, !assignments[index].tracked.isFullScreen,
+                      assignments[index].tracked.displayKey == target.key,
+                      assignments[index].tracked.desktop != wanted else { continue }
+                await sendToDesktop(&assignments[index], target: target, desktop: wanted, displays: displays)
+                if SpacesManager.instantMovesWork == false { break }
+            }
+        }
         if thorough, displays.count > 1 {
             await relocateInGroups(&assignments, scene: scene, displays: displays)
         }
-        let fallback = displays.first(where: \.isBuiltin) ?? displays.first
-        let useDesktops = manageSpaces && SpacesManager.isAvailable
         let visibleDesktops = SpacesManager.layouts(for: displays).mapValues { $0.currentIndex.map { $0 + 1 } }
         let order = assignments.indices.sorted { lhs, rhs in
             let left = assignments[lhs].saved
@@ -1631,17 +1684,30 @@ final class Engine {
             // Tutto il resto vuol dire cambiare scrivania, e lo fa il richiamo completo.
             if !thorough {
                 let visible = visibleDesktops[target.id] ?? nil
-                guard !sameDisplay, wanted == nil || wanted == visible,
-                      let live = assignments[index].tracked.live,
-                      isOnVisibleDesktop(assignments[index].tracked, displays: displays) else { continue }
-                let frame = targetFrame(for: assignments[index].saved, on: target, scene: scene)
-                WindowManager.setFrame(live.element, to: frame)
-                assignments[index].tracked.frame = frame
-                assignments[index].tracked.displayKey = target.key
-                assignments[index].tracked.desktop = wanted ?? visible
-                assignments[index].needsFrame = true
-                Log.write("\(assignments[index].saved.appName) \"\(assignments[index].saved.title)\": portata su \(target.name)")
+                if !sameDisplay {
+                    // Sull'altro monitor arriva sulla scrivania in vista; se ne serve un'altra la mando lì dopo,
+                    // solo se su questo Mac lo spostamento istantaneo funziona.
+                    guard wanted == nil || wanted == visible || SpacesManager.instantMovesWork != false,
+                          let live = assignments[index].tracked.live,
+                          isOnVisibleDesktop(assignments[index].tracked, displays: displays) else { continue }
+                    let frame = targetFrame(for: assignments[index].saved, on: target, scene: scene)
+                    WindowManager.setFrame(live.element, to: frame)
+                    assignments[index].tracked.frame = frame
+                    assignments[index].tracked.displayKey = target.key
+                    assignments[index].tracked.desktop = visible
+                    assignments[index].needsFrame = true
+                    Log.write("\(assignments[index].saved.appName) \"\(assignments[index].saved.title)\": portata su \(target.name)")
+                    guard let wanted, wanted != visible else { continue }
+                    await Input.pause(0.2)
+                }
+                if let wanted {
+                    await sendToDesktop(&assignments[index], target: target, desktop: wanted, displays: displays)
+                }
                 continue
+            }
+            if DisplayManager.fingerprint(DisplayManager.activeDisplays()) != DisplayManager.fingerprint(displays) {
+                Log.write("Monitor cambiati: smetto di spostare finestre")
+                break
             }
 
             // La finestra deve essere raggiungibile: porto in vista la sua scrivania.
@@ -1711,6 +1777,18 @@ final class Engine {
         }
     }
 
+    /// Manda una finestra sulla sua scrivania senza farla vedere, se su questo Mac funziona.
+    @discardableResult
+    private func sendToDesktop(_ assignment: inout Assignment, target: LiveDisplay, desktop: Int, displays: [LiveDisplay]) async -> Bool {
+        guard SpacesManager.instantMovesWork != false, let id = assignment.tracked.windowID,
+              let space = SpacesManager.layouts(for: displays)[target.id]?.spaceIDs[safe: desktop - 1] else { return false }
+        guard await SpacesManager.sendWindow(id, toSpace: space) else { return false }
+        assignment.tracked.displayKey = target.key
+        assignment.tracked.desktop = desktop
+        Log.write("\(assignment.saved.appName): mandata sulla scrivania \(desktop) di \(target.name)")
+        return true
+    }
+
     /// Sposta le finestre sulle scrivanie giuste a gruppi: per ogni scrivania di arrivo un solo cambio di scrivania.
     /// Le finestre su scrivanie non in vista le raggiungo senza mostrarle (elementi letti da tutte le scrivanie).
     /// Quelle che restano sullo stesso monitor passano un attimo dall'altro monitor.
@@ -1735,6 +1813,10 @@ final class Engine {
         Log.write("Spostamenti a gruppi: \(groups.values.map(\.count).reduce(0, +)) finestre su \(groups.count) scrivanie")
 
         for key in groups.keys.sorted() {
+            if DisplayManager.fingerprint(DisplayManager.activeDisplays()) != DisplayManager.fingerprint(displays) {
+                Log.write("Monitor cambiati: smetto di spostare finestre")
+                break
+            }
             guard let indices = groups[key], let destination = destinations[key],
                   let other = displays.first(where: { $0.id != destination.display.id }) else { continue }
             let target = destination.display
