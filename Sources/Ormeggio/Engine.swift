@@ -1168,7 +1168,7 @@ final class Engine {
         var action = updateScene
         if desktopWork {
             let estimate = max(2, toMove.count + (spacesToFix.isEmpty ? 0 : 3))
-            actionTitle = "Sistema le scrivanie (circa \(estimate) secondi)"
+            actionTitle = "Sposta ogni finestra sulla sua scrivania (circa \(estimate) secondi)"
             let sceneID = scene.id
             action = { [weak self] in
                 guard let self, let fresh = self.store.scene(id: sceneID) else { return }
@@ -1179,7 +1179,7 @@ final class Engine {
         if hasWarnings {
             title = "“\(sceneName)”: qualcosa non è tornato"
         } else if desktopWork {
-            title = "“\(sceneName)”: manca solo l'ordine delle scrivanie"
+            title = "“\(sceneName)”: qualche finestra è su un'altra scrivania"
         } else {
             title = "“\(sceneName)” è al suo posto"
         }

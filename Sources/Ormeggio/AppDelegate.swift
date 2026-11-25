@@ -371,7 +371,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             setSubtitle(again, "In un attimo: monitor, posizioni, finestre dal Dock")
             menu.addItem(again)
             if engine.manageSpaces {
-                let desktops = commandItem("Sistema anche le scrivanie", #selector(recallActiveWithDesktops), icon: "square.stack.3d.up")
+                let desktops = commandItem("Sposta ogni finestra sulla sua scrivania", #selector(recallActiveWithDesktops), icon: "square.stack.3d.up")
                 desktops.isEnabled = trusted
                 setSubtitle(desktops, "Qualche secondo: aggiunge o toglie scrivanie e ci sposta le finestre")
                 menu.addItem(desktops)
