@@ -368,16 +368,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                   subtitle: details.joined(separator: " · ")))
             let again = commandItem("Richiama di nuovo", #selector(recallActive), icon: "arrow.clockwise")
             again.isEnabled = trusted
-            setSubtitle(again, "In un attimo: monitor, posizioni, finestre dal Dock")
             menu.addItem(again)
             if engine.manageSpaces {
                 let desktops = commandItem("Sposta ogni finestra sulla sua scrivania", #selector(recallActiveWithDesktops), icon: "square.stack.3d.up")
                 desktops.isEnabled = trusted
-                setSubtitle(desktops, "Qualche secondo: aggiunge o toglie scrivanie e ci sposta le finestre")
                 menu.addItem(desktops)
             }
         } else {
-            menu.addItem(infoItem("Nessuna", icon: "moon.zzz", subtitle: "Richiama una scena o salvane una"))
+            menu.addItem(infoItem("Nessuna", icon: "moon.zzz"))
         }
         if !trusted {
             menu.addItem(commandItem("Ripara il permesso di Accessibilità…", #selector(repairPermissionFromMenu),
@@ -386,10 +384,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         // ── Scene
         menu.addItem(.separator())
-        menu.addItem(NSMenuItem.sectionHeader(title: "Scene"))
         let saveItem = commandItem("Salva scena…", #selector(saveSceneFromMenu), icon: "plus.circle", key: "s")
         saveItem.isEnabled = !engine.isWorking
-        setSubtitle(saveItem, "Ricorda finestre, monitor e scrivanie di adesso")
         menu.addItem(saveItem)
 
         let scenes = store.scenes.sorted { lhs, rhs in
@@ -416,54 +412,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 item.representedObject = scene.id.uuidString
                 item.state = scene.id == active?.id ? .on : .off
                 item.isEnabled = !engine.isWorking && trusted
-                var details = ["\(scene.windows.count) finestre"]
-                if scene.autoApply { details.append("si richiama da sola") }
-                setSubtitle(item, details.joined(separator: " · "))
                 recallMenu.addItem(item)
             }
         }
         let recallItem = NSMenuItem(title: "Richiama scena", action: nil, keyEquivalent: "")
         recallItem.image = symbol("rectangle.stack")
         recallItem.submenu = recallMenu
-        setSubtitle(recallItem, scenes.isEmpty ? "Nessuna scena salvata" : "\(scenes.count) \(scenes.count == 1 ? "scena" : "scene") · cmd 1…\(min(scenes.count, 9))")
         menu.addItem(recallItem)
-        menu.addItem(commandItem("Gestisci le scene…", #selector(showScenes), icon: "square.grid.2x2", key: "o"))
 
-        // ── Monitor collegati
+        // ── Aggiornamenti e assistenza
         menu.addItem(.separator())
-        menu.addItem(NSMenuItem.sectionHeader(title: displays.count == 1 ? "Monitor collegato" : "Monitor collegati"))
+        let checkItem = commandItem("Cerca aggiornamenti", #selector(checkForUpdates), icon: "arrow.triangle.2.circlepath")
+        setSubtitle(checkItem, "Versione \(updater.currentVersion)")
+        menu.addItem(checkItem)
+        let reportItem = commandItem("Prepara segnalazione", #selector(sendReport), icon: "exclamationmark.bubble")
+        reportItem.isEnabled = !engine.isWorking
+        menu.addItem(reportItem)
+
+        // ── Impostazioni: tutto quello che serve di rado
+        let settingsMenu = NSMenu()
+        settingsMenu.autoenablesItems = false
+        settingsMenu.addItem(commandItem("Gestisci le scene…", #selector(showScenes), icon: "square.grid.2x2", key: "o"))
+        if UserDefaults.standard.string(forKey: "lastUpdateNotes")?.isEmpty == false {
+            settingsMenu.addItem(commandItem("Novità dell'ultima versione", #selector(showWhatsNewFromMenu), icon: "sparkles"))
+        }
+        settingsMenu.addItem(.separator())
+        settingsMenu.addItem(NSMenuItem.sectionHeader(title: displays.count == 1 ? "Monitor collegato" : "Monitor collegati"))
         let layouts = SpacesManager.layouts(for: displays)
         for display in displays {
             var details: [String] = []
             if let mode = display.mode { details.append(mode.label) }
             if let layout = layouts[display.id] { details.append("\(layout.count) \(layout.count == 1 ? "scrivania" : "scrivanie")") }
-            menu.addItem(infoItem(display.isBuiltin ? "Schermo del Mac" : display.name,
-                                  icon: display.isBuiltin ? "laptopcomputer" : "display",
-                                  subtitle: details.joined(separator: " · ")))
+            settingsMenu.addItem(infoItem(display.isBuiltin ? "Schermo del Mac" : display.name,
+                                          icon: display.isBuiltin ? "laptopcomputer" : "display",
+                                          subtitle: details.joined(separator: " · ")))
         }
-
-        // ── Assistenza
-        menu.addItem(.separator())
-        menu.addItem(NSMenuItem.sectionHeader(title: "Assistenza"))
-        let reportItem = commandItem("Prepara segnalazione", #selector(sendReport), icon: "exclamationmark.bubble")
-        reportItem.isEnabled = !engine.isWorking
-        setSubtitle(reportItem, "Un file da trascinare nella chat con Claude")
-        menu.addItem(reportItem)
-
-        // ── Aggiornamenti
-        menu.addItem(.separator())
-        menu.addItem(NSMenuItem.sectionHeader(title: "Aggiornamenti"))
-        let checkItem = commandItem("Cerca aggiornamenti", #selector(checkForUpdates), icon: "arrow.triangle.2.circlepath")
-        setSubtitle(checkItem, "Hai la versione \(updater.currentVersion) · si aggiorna anche da sola")
-        menu.addItem(checkItem)
-        if UserDefaults.standard.string(forKey: "lastUpdateNotes")?.isEmpty == false {
-            menu.addItem(commandItem("Novità dell'ultima versione", #selector(showWhatsNewFromMenu), icon: "sparkles"))
-        }
-
-        // ── Impostazioni
-        menu.addItem(.separator())
-        let settingsMenu = NSMenu()
-        settingsMenu.autoenablesItems = false
+        settingsMenu.addItem(.separator())
         settingsMenu.addItem(NSMenuItem.sectionHeader(title: "Richiamo"))
         let autoItem = commandItem("Richiama da sola quando cambiano i monitor", #selector(toggleAutoApply), icon: "bolt.fill")
         autoItem.state = engine.autoApplyEnabled ? .on : .off
