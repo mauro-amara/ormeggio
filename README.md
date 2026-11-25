@@ -16,40 +16,69 @@ Ormeggio è un'app gratuita per la barra dei menu. Sistemi il Mac come ti serve 
 
 ### Installare
 
-Serve un Mac con macOS 14 o successivo. Ci vogliono un paio di minuti, e i passi 4, 5 e 6 si fanno solo la prima volta.
+**Cosa serve:** un Mac con macOS 14 (Sonoma) o successivo, con processore Apple o Intel. Ci vogliono un paio di minuti.
 
-**Scarica e copia l'app**
+Ci sono due modi. Il primo è quello classico: scarichi e trascini. Il secondo è una riga da incollare nel Terminale, e serve se il primo si blocca.
 
-1. Scarica **[Ormeggio.dmg](https://github.com/mauro-amara/ormeggio/raw/builds/Ormeggio.dmg)** e aprilo con un doppio clic.
-2. Nella finestra che si apre, trascina l'icona di **Ormeggio** sulla cartella **Applicazioni**.
-3. Apri la cartella Applicazioni e apri **Ormeggio** con un doppio clic.
+#### Perché macOS blocca Ormeggio la prima volta
 
-**Sblocca l'app (solo la prima volta)**
+macOS apre senza avvisi solo le app certificate da Apple. Ormeggio non lo è ancora, quindi la prima volta che lo apri macOS mostra "Ormeggio non è stata aperta". Non vuol dire che sia pericoloso: macOS non ha modo di controllarlo. Lo sblocchi una volta sola, poi si apre normalmente, anche dopo gli aggiornamenti.
 
-Ormeggio non è ancora certificato da Apple, quindi al primo avvio macOS lo blocca con il messaggio "Ormeggio non è stata aperta". È normale:
+#### Modo 1: scarica e trascina
 
-4. Premi **Fine**. Non premere "Sposta nel Cestino".
-5. Apri **Impostazioni di Sistema**, scegli **Privacy e sicurezza** e scorri fino in fondo. Accanto al messaggio su Ormeggio premi **Apri comunque**, poi inserisci la password del Mac o usa Touch ID.
-6. Nella finestra che compare premi di nuovo **Apri comunque**. Se non compare, apri di nuovo Ormeggio da Applicazioni e premi **Apri comunque**.
+1. Scarica **[Ormeggio.dmg](https://github.com/mauro-amara/ormeggio/raw/builds/Ormeggio.dmg)**. Il link scarica sempre l'ultima versione.
+2. Apri il file scaricato con un doppio clic. Si apre una finestra con l'icona di Ormeggio e la cartella Applicazioni.
+3. Trascina l'icona di **Ormeggio** sulla cartella **Applicazioni**.
+4. Apri la cartella Applicazioni (nel Finder, a sinistra) e apri **Ormeggio** con un doppio clic.
+5. Compare "Ormeggio non è stata aperta". Premi **Fine**. Non premere "Sposta nel Cestino".
+6. Apri **Impostazioni di Sistema** (menu Apple in alto a sinistra) e scegli **Privacy e sicurezza**. Scorri fino in fondo alla pagina.
+7. Accanto al messaggio su Ormeggio premi **Apri comunque**. macOS chiede la password del Mac o Touch ID.
+8. Nella finestra che compare premi di nuovo **Apri comunque**. Ormeggio si apre: continua da [Primo avvio](#primo-avvio).
 
-Se in fondo a Privacy e sicurezza il pulsante **Apri comunque** non c'è, prova ad aprire di nuovo Ormeggio da Applicazioni e torna subito lì.
+Se al passo 7 il pulsante **Apri comunque** non c'è, apri di nuovo Ormeggio da Applicazioni e torna subito in Privacy e sicurezza: il pulsante compare solo per un po' dopo il blocco. Se non c'è ancora, o se dopo il passo 8 ricompare "Ormeggio non è stata aperta", usa il modo 2.
 
-**Dai il permesso per spostare le finestre**
+#### Modo 2: una riga nel Terminale
 
-7. Si apre il benvenuto di Ormeggio: premi **Continua**. Si apre Impostazioni di Sistema su **Accessibilità**: accendi l'interruttore accanto a **Ormeggio**. Se Ormeggio non è nell'elenco, premi **+** in fondo all'elenco, scegli **Ormeggio** nella cartella Applicazioni, premi **Apri** e poi accendi l'interruttore.
-8. Torna a lavorare: l'icona di Ormeggio è nella barra in alto, vicino all'orologio.
+Funziona anche sui Mac gestiti dall'azienda, dove "Apri comunque" a volte è disattivato. Non serve aver fatto il modo 1, e se l'hai fatto non importa: questa riga sostituisce l'app che hai già copiato.
 
-macOS chiede altri due permessi quando servono, la prima volta. Per le notifiche degli aggiornamenti premi **Consenti**. Quando salvi una scena con Chrome, Safari o il Finder aperti, macOS chiede se Ormeggio può controllarli: premi **OK**, serve per ritrovare schede e cartelle.
-
-**In alternativa, con il Terminale**
-
-Chi è a suo agio con il Terminale può saltare i passi da 1 a 6. Apri **Terminale** (Applicazioni > Utility), incolla questa riga e premi Invio:
+1. Apri il **Terminale**: cartella Applicazioni, poi Utility, poi Terminale. Oppure premi cmd + spazio, scrivi "Terminale" e premi Invio.
+2. Copia questa riga, incollala nel Terminale e premi Invio:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/mauro-amara/ormeggio/main/install.sh | sh
 ```
 
-Lo script ([install.sh](install.sh)) scarica l'ultima versione, controlla impronta, identificativo e firma, la copia in Applicazioni e la apre, senza il blocco di macOS. Non chiede password. Poi riparti dal passo 7.
+3. In pochi secondi compaiono tre righe: "Scarico Ormeggio...", "Installo in Applicazioni...", "Fatto". Ormeggio si apre da solo: continua da [Primo avvio](#primo-avvio). Il Terminale puoi chiuderlo.
+
+Cosa fa la riga: scarica da questo repository lo script [install.sh](install.sh) e lo esegue. Lo script scarica l'ultima versione e, prima di installarla, controlla tre cose: che il file sia identico a quello pubblicato (impronta SHA-256), che dentro ci sia proprio Ormeggio e che la firma sia intatta. Se un controllo non passa, si ferma e non installa niente. Poi copia Ormeggio in Applicazioni e lo apre. Non chiede la password e non tocca nient'altro sul Mac. Scaricato così, macOS non lo blocca.
+
+Se il Terminale scrive "Ormeggio non installato", copia la riga che segue e mandala a chi mantiene Ormeggio.
+
+#### Primo avvio
+
+1. Si apre il **benvenuto** di Ormeggio. La casella "Avvia Ormeggio quando accendi il Mac" è già spuntata: lasciala così, se vuoi che parta da solo. Premi **Continua**.
+2. macOS chiede il permesso di **Accessibilità** e si apre Impostazioni di Sistema su quella pagina. Serve a Ormeggio per spostare le finestre, ed è l'unica cosa che macOS non lascia fare a un'app: l'interruttore lo accendi tu. Accendi quello accanto a **Ormeggio**.
+3. Se Ormeggio non è nell'elenco, premi **+** in fondo all'elenco, scegli **Ormeggio** nella cartella Applicazioni, premi **Apri** e accendi l'interruttore.
+4. Quando il permesso è attivo, un riquadro in basso dice "Permesso attivo". L'icona di Ormeggio è nella barra in alto, vicino all'orologio.
+5. Sistema le finestre come ti servono e scegli **Salva scena…** dall'icona. Fatto.
+
+macOS può chiedere altri due permessi, la prima volta che servono:
+
+- **Notifiche**: premi **Consenti**. Servono per avvisarti quando arriva una versione nuova.
+- **Controllo di Chrome, Safari o del Finder**, quando salvi una scena con quelle app aperte: premi **OK**. Serve per ritrovare schede e cartelle. Ormeggio non legge le pagine e non tocca i file.
+
+#### Se l'installazione non va
+
+| Cosa vedi | Cosa fare |
+| --- | --- |
+| "Ormeggio non è stata aperta" e in Privacy e sicurezza non c'è "Apri comunque" | Usa il [modo 2](#modo-2-una-riga-nel-terminale). |
+| "Ormeggio è danneggiato e non può essere aperto" | È lo stesso blocco di macOS, con un altro messaggio. Usa il modo 2. |
+| Ormeggio non è nell'elenco di Accessibilità | Premi **+** in fondo all'elenco, scegli Ormeggio in Applicazioni e premi Apri. |
+| L'interruttore è acceso, ma Ormeggio dice che manca il permesso | Icona di Ormeggio > **Ripara il permesso di Accessibilità…**, poi riaccendi l'interruttore. |
+| Non vedo l'icona nella barra in alto | Sui Mac con la tacca nello schermo le icone di troppo finiscono dietro la tacca. Chiudi qualche altra app della barra, oppure riapri Ormeggio da Applicazioni. |
+| Il riquadro dice di non toccare mouse e tastiera | Ormeggio sta spostando le finestre: aspetta qualche secondo che finisca. |
+
+Per qualsiasi altro problema: icona di Ormeggio > **Segnalazioni**, e manda il file a chi mantiene Ormeggio.
 
 ### Usare
 
@@ -113,7 +142,7 @@ Icona di Ormeggio > Impostazioni > **Disinstalla Ormeggio…**. Toglie l'avvio a
 
 - **Scrivanie.** Apple non offre API pubbliche. Ormeggio legge le scrivanie con funzioni private caricate all'avvio e le cambia simulando le scorciatoie ctrl + frecce, che devono essere attive (lo sono di serie). Un aggiornamento di macOS può richiedere una correzione.
 - **Movimento visibile.** Durante salvataggio e richiamo le scrivanie scorrono per qualche secondo.
-- **Firma.** Senza un certificato Developer ID l'app è firmata solo localmente e macOS la blocca alla prima apertura: vedi i passi 4, 5 e 6 di Installare.
+- **Firma.** Senza un certificato Developer ID l'app è firmata solo localmente e macOS la blocca alla prima apertura: vedi [Installare](#installare).
 
 ## Per chi sviluppa
 
