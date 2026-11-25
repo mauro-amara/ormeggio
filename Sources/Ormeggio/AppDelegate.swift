@@ -382,29 +382,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                      icon: "exclamationmark.triangle.fill", color: .systemOrange))
         }
 
-        // ── Scene
+        // ── Scene: si vedono subito, un clic e la scena torna.
         menu.addItem(.separator())
-        let saveItem = commandItem("Salva scena…", #selector(saveSceneFromMenu), icon: "plus.circle", key: "s")
-        saveItem.isEnabled = !engine.isWorking
-        menu.addItem(saveItem)
-
         let scenes = store.scenes.sorted { lhs, rhs in
             let lhsHere = lhs.fingerprint == fingerprint
             let rhsHere = rhs.fingerprint == fingerprint
             if lhsHere != rhsHere { return lhsHere }
             return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
         }
-        let recallMenu = NSMenu()
-        recallMenu.autoenablesItems = false
+        let mixed = Set(scenes.map { $0.fingerprint == fingerprint }).count > 1
         if scenes.isEmpty {
-            recallMenu.addItem(infoItem("Nessuna scena salvata", icon: "tray"))
+            menu.addItem(NSMenuItem.sectionHeader(title: "Scene"))
+            menu.addItem(infoItem("Nessuna scena salvata", icon: "tray"))
         } else {
             var lastHere: Bool?
             for (offset, scene) in scenes.enumerated() {
                 let here = scene.fingerprint == fingerprint
                 if here != lastHere {
-                    if lastHere != nil { recallMenu.addItem(.separator()) }
-                    recallMenu.addItem(NSMenuItem.sectionHeader(title: here ? "Per questi monitor" : "Per altri monitor"))
+                    let title = !mixed ? "Scene" : (here ? "Scene per questi monitor" : "Scene per altri monitor")
+                    menu.addItem(NSMenuItem.sectionHeader(title: title))
                     lastHere = here
                 }
                 let key = offset < 9 ? "\(offset + 1)" : ""
@@ -412,13 +408,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 item.representedObject = scene.id.uuidString
                 item.state = scene.id == active?.id ? .on : .off
                 item.isEnabled = !engine.isWorking && trusted
-                recallMenu.addItem(item)
+                menu.addItem(item)
             }
         }
-        let recallItem = NSMenuItem(title: "Richiama scena", action: nil, keyEquivalent: "")
-        recallItem.image = symbol("rectangle.stack")
-        recallItem.submenu = recallMenu
-        menu.addItem(recallItem)
+        let saveItem = commandItem("Salva scena…", #selector(saveSceneFromMenu), icon: "plus.circle", key: "s")
+        saveItem.isEnabled = !engine.isWorking
+        menu.addItem(saveItem)
+        menu.addItem(commandItem("Gestisci le scene…", #selector(showScenes), icon: "square.grid.2x2", key: "o"))
 
         // ── Aggiornamenti e assistenza
         menu.addItem(.separator())
@@ -432,11 +428,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // ── Impostazioni: tutto quello che serve di rado
         let settingsMenu = NSMenu()
         settingsMenu.autoenablesItems = false
-        settingsMenu.addItem(commandItem("Gestisci le scene…", #selector(showScenes), icon: "square.grid.2x2", key: "o"))
         if UserDefaults.standard.string(forKey: "lastUpdateNotes")?.isEmpty == false {
             settingsMenu.addItem(commandItem("Novità dell'ultima versione", #selector(showWhatsNewFromMenu), icon: "sparkles"))
+            settingsMenu.addItem(.separator())
         }
-        settingsMenu.addItem(.separator())
         settingsMenu.addItem(NSMenuItem.sectionHeader(title: displays.count == 1 ? "Monitor collegato" : "Monitor collegati"))
         let layouts = SpacesManager.layouts(for: displays)
         for display in displays {
