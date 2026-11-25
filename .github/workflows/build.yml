@@ -73,6 +73,8 @@ jobs:
           if [ "${{ job.status }}" = "success" ] && ls dist/*.dmg >/dev/null 2>&1; then
             BRANCH=builds
             cp dist/*.dmg out/
+            # Copia con un nome fisso: il link per scaricare l'ultima versione non cambia mai.
+            cp "dist/Ormeggio-$VERSION.dmg" out/Ormeggio.dmg
             SHA=$(shasum -a 256 "dist/Ormeggio-$VERSION.dmg" | cut -d' ' -f1)
             printf '{"version":"%s","build":%s,"dmg":"Ormeggio-%s.dmg","sha256":"%s","notes":%s}\n' "$VERSION" "$BUILD" "$VERSION" "$SHA" "$NOTES" > out/latest.json
           fi

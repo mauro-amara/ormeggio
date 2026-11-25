@@ -16,22 +16,40 @@ Ormeggio è un'app gratuita per la barra dei menu. Sistemi il Mac come ti serve 
 
 ### Installare
 
-Il modo più semplice, senza avvisi di macOS:
+Serve un Mac con macOS 14 o successivo. Ci vogliono un paio di minuti, e i passi 4, 5 e 6 si fanno solo la prima volta.
 
-1. Apri **Terminale** (Applicazioni > Utility > Terminale).
-2. Incolla questa riga e premi Invio:
+**Scarica e copia l'app**
+
+1. Scarica **[Ormeggio.dmg](https://github.com/mauro-amara/ormeggio/raw/builds/Ormeggio.dmg)** e aprilo con un doppio clic.
+2. Nella finestra che si apre, trascina l'icona di **Ormeggio** sulla cartella **Applicazioni**.
+3. Apri la cartella Applicazioni e apri **Ormeggio** con un doppio clic.
+
+**Sblocca l'app (solo la prima volta)**
+
+Ormeggio non è ancora certificato da Apple, quindi al primo avvio macOS lo blocca con il messaggio "Ormeggio non è stata aperta". È normale:
+
+4. Premi **Fine**. Non premere "Sposta nel Cestino".
+5. Apri **Impostazioni di Sistema**, scegli **Privacy e sicurezza** e scorri fino in fondo. Accanto al messaggio su Ormeggio premi **Apri comunque**, poi inserisci la password del Mac o usa Touch ID.
+6. Nella finestra che compare premi di nuovo **Apri comunque**. Se non compare, apri di nuovo Ormeggio da Applicazioni e premi **Apri comunque**.
+
+Se in fondo a Privacy e sicurezza il pulsante **Apri comunque** non c'è, prova ad aprire di nuovo Ormeggio da Applicazioni e torna subito lì.
+
+**Dai il permesso per spostare le finestre**
+
+7. Si apre il benvenuto di Ormeggio: premi **Continua**. Si apre Impostazioni di Sistema su **Accessibilità**: attiva l'interruttore accanto a **Ormeggio**.
+8. Torna a lavorare: l'icona di Ormeggio è nella barra in alto, vicino all'orologio.
+
+macOS chiede altri due permessi quando servono, la prima volta. Per le notifiche degli aggiornamenti premi **Consenti**. Quando salvi una scena con Chrome, Safari o il Finder aperti, macOS chiede se Ormeggio può controllarli: premi **OK**, serve per ritrovare schede e cartelle.
+
+**In alternativa, con il Terminale**
+
+Chi è a suo agio con il Terminale può saltare i passi da 1 a 6. Apri **Terminale** (Applicazioni > Utility), incolla questa riga e premi Invio:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/mauro-amara/ormeggio/main/install.sh | sh
 ```
 
-3. Ormeggio si apre da solo. Nella finestra di benvenuto premi **Continua**: si apre Impostazioni di Sistema, attiva Ormeggio nell'elenco **Accessibilità**.
-
-Lo script ([install.sh](install.sh)) scarica l'ultima versione, controlla impronta, identificativo e firma, la copia in Applicazioni e la apre. Non chiede password. Serve anche per reinstallare.
-
-In alternativa scarica il file `Ormeggio-<versione>.dmg` dal ramo [`builds`](https://github.com/mauro-amara/ormeggio/tree/builds) e trascina **Ormeggio** su **Applicazioni**. Scaricata dal browser, macOS la blocca finché non premi **Apri comunque** in Impostazioni di Sistema > Privacy e sicurezza: Ormeggio non è ancora autenticata da Apple.
-
-L'icona di Ormeggio compare nella barra in alto, vicino all'orologio.
+Lo script ([install.sh](install.sh)) scarica l'ultima versione, controlla impronta, identificativo e firma, la copia in Applicazioni e la apre, senza il blocco di macOS. Non chiede password. Poi riparti dal passo 7.
 
 ### Usare
 
@@ -59,7 +77,7 @@ Ormeggio controlla ogni mezz'ora se c'è una versione nuova e la installa da sol
 
 ### Se qualcosa non va
 
-Icona di Ormeggio > **Segnalazioni**. Ormeggio prepara un file con la diagnostica e lo mostra nel Finder: trascinalo nella chat con Claude. Il file resta sul Mac finché non lo mandi tu. Contiene il registro delle ultime operazioni e i titoli delle finestre, mai gli indirizzi delle schede.
+Icona di Ormeggio > **Segnalazioni**. Ormeggio prepara un file con la diagnostica e lo mostra nel Finder: mandalo a chi mantiene Ormeggio. Il file resta sul Mac finché non lo mandi tu. Contiene il registro delle ultime operazioni e i titoli delle finestre, mai gli indirizzi delle schede.
 
 ### Disinstallare
 
@@ -70,7 +88,7 @@ Icona di Ormeggio > Impostazioni > **Disinstalla Ormeggio…**. Toglie l'avvio a
 - **Permessi.** Ormeggio usa l'Accessibilità per spostare le finestre e, se concessa, l'Automazione per leggere schede e cartelle. Non chiede altro: niente registrazione dello schermo, niente accesso ai file.
 - **Dati.** Scene e registro stanno in `~/Library/Application Support/Ormeggio`, leggibili solo dalla persona. Non escono dal Mac. Nel registro ci sono i titoli delle finestre e i nomi dei siti, mai gli indirizzi completi delle schede.
 - **Aggiornamenti.** Si scaricano solo da questo repository, in HTTPS. Prima di installare, Ormeggio controlla che il file sia identico a quello pubblicato (impronta SHA-256), che contenga proprio Ormeggio nella versione annunciata e che la firma sia intatta. Se un controllo non passa, l'aggiornamento non si installa. La compilazione usa solo git e gli strumenti di Apple, senza azioni di terzi, e fa gli stessi controlli prima di pubblicare.
-- **Limite noto.** L'app è firmata localmente, non con un certificato Developer ID di Apple. La sicurezza degli aggiornamenti dipende quindi dall'account GitHub che pubblica. Il passo successivo è firmare e notarizzare con l'account sviluppatore dell'azienda.
+- **Limite noto.** L'app è firmata localmente, non con un certificato Developer ID di Apple. La sicurezza degli aggiornamenti dipende quindi dall'account GitHub che pubblica. Il passo successivo è firmare e certificare l'app con un account sviluppatore Apple: da lì si apre senza avvisi.
 - **Segnalazioni.** Niente parte da solo: "Segnalazioni" crea un file sul Mac, e la persona decide se e a chi mandarlo. Nell'app non c'è nessuna chiave o password.
 
 ## Cosa fa
@@ -95,7 +113,7 @@ Icona di Ormeggio > Impostazioni > **Disinstalla Ormeggio…**. Toglie l'avvio a
 
 - **Scrivanie.** Apple non offre API pubbliche. Ormeggio legge le scrivanie con funzioni private caricate all'avvio e le cambia simulando le scorciatoie ctrl + frecce, che devono essere attive (lo sono di serie). Un aggiornamento di macOS può richiedere una correzione.
 - **Movimento visibile.** Durante salvataggio e richiamo le scrivanie scorrono per qualche secondo.
-- **Firma.** Senza un certificato Developer ID l'app è firmata solo localmente e macOS chiede conferma alla prima apertura.
+- **Firma.** Senza un certificato Developer ID l'app è firmata solo localmente e macOS la blocca alla prima apertura: vedi i passi 4, 5 e 6 di Installare.
 
 ## Per chi sviluppa
 
