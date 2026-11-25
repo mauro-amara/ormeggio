@@ -140,6 +140,38 @@ enum WindowManager {
         return result
     }
 
+    /// La finestra che si vede in un punto dello schermo, presa come la prenderebbe il mouse.
+    /// Serve per le finestre che l'app non elenca all'Accessibilità (per esempio i siti installati come app
+    /// in Chrome, che macOS gestisce con un processo a parte). Restituisce la finestra solo se è proprio quella cercata.
+    static func windowElement(at point: CGPoint, id wanted: CGWindowID) -> (element: AXUIElement, pid: pid_t)? {
+        var found: AXUIElement?
+        guard AXUIElementCopyElementAtPosition(AXUIElementCreateSystemWide(), Float(point.x), Float(point.y), &found) == .success,
+              var element = found else { return nil }
+        for _ in 0..<40 {
+            var candidate: AXUIElement?
+            if stringAttribute(element, kAXRoleAttribute) == kAXWindowRole {
+                candidate = element
+            } else {
+                var window: CFTypeRef?
+                if AXUIElementCopyAttributeValue(element, kAXWindowAttribute as CFString, &window) == .success,
+                   let ref = window, CFGetTypeID(ref) == AXUIElementGetTypeID() {
+                    candidate = (ref as! AXUIElement)
+                }
+            }
+            if let candidate {
+                guard windowID(of: candidate) == wanted else { return nil }
+                var pid: pid_t = 0
+                AXUIElementGetPid(candidate, &pid)
+                return (candidate, pid)
+            }
+            var parent: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(element, kAXParentAttribute as CFString, &parent) == .success,
+                  let ref = parent, CFGetTypeID(ref) == AXUIElementGetTypeID() else { return nil }
+            element = ref as! AXUIElement
+        }
+        return nil
+    }
+
     /// Le finestre standard di un'app su tutte le scrivanie, come elementi di Accessibilità:
     /// servono per agire su una finestra (per esempio ridurla nel Dock) senza cambiare scrivania.
     static func elementsOnAllDesktops(pid: pid_t) -> [CGWindowID: AXUIElement] {

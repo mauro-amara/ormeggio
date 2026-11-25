@@ -1689,8 +1689,10 @@ final class Engine {
                 }
             }
             // Quelle già sul monitor di arrivo passano dall'altro monitor, così non restano sulla scrivania vecchia.
+            // Una alla volta: se due finestre stanno una sopra l'altra, spostata la prima si vede la seconda.
             var parked = false
             for index in indices where assignments[index].tracked.displayKey == target.key {
+                if elements[index] == nil { elements[index] = reachByPoint(assignments[index].tracked, displays: displays) }
                 guard let element = elements[index] else { continue }
                 let frame = targetFrame(for: assignments[index].saved, on: target, scene: scene)
                 let size = CGSize(width: min(frame.width, other.bounds.width * 0.8), height: min(frame.height, other.bounds.height * 0.8))
@@ -1699,6 +1701,9 @@ final class Engine {
                 parked = true
             }
             if parked { await Input.pause(0.3) }
+            for index in indices where elements[index] == nil {
+                elements[index] = reachByPoint(assignments[index].tracked, displays: displays)
+            }
             let switched = await SpacesManager.switchDesktop(on: target, to: destination.desktop - 1, displays: displays)
             for index in indices {
                 guard let element = elements[index] else { continue }
@@ -1717,6 +1722,31 @@ final class Engine {
             }
             Log.write("\(target.name), scrivania \(destination.desktop): arrivate \(arrived) di \(indices.count)" + (switched ? "" : " (il cambio di scrivania non ha risposto)"))
         }
+    }
+
+    /// Prende una finestra dal punto dello schermo in cui si vede, come farebbe il mouse.
+    /// Funziona solo se la finestra è sulla scrivania in vista e almeno un suo punto non è coperto.
+    private func reachByPoint(_ tracked: TrackedWindow, displays: [LiveDisplay]) -> AXUIElement? {
+        guard let id = tracked.windowID, isOnVisibleDesktop(tracked, displays: displays),
+              let bounds = WindowManager.systemWindows().first(where: { $0.id == id })?.bounds,
+              bounds.width > 60, bounds.height > 60 else { return nil }
+        let probes = [
+            CGPoint(x: bounds.midX, y: bounds.midY),
+            CGPoint(x: bounds.midX, y: bounds.minY + 12),
+            CGPoint(x: bounds.minX + 40, y: bounds.minY + 40),
+            CGPoint(x: bounds.maxX - 40, y: bounds.maxY - 40),
+            CGPoint(x: bounds.minX + bounds.width * 0.25, y: bounds.midY),
+            CGPoint(x: bounds.minX + bounds.width * 0.75, y: bounds.midY)
+        ]
+        for point in probes {
+            if let found = WindowManager.windowElement(at: point, id: id) {
+                let owner = NSRunningApplication(processIdentifier: found.pid)
+                Log.write("\(tracked.appName): presa dal punto in cui si vede (gestita da \(owner?.localizedName ?? "?"), \(owner?.bundleIdentifier ?? "?"))")
+                return found.element
+            }
+        }
+        Log.write("\(tracked.appName): non riesco a prenderla nemmeno dal punto in cui si vede (ruolo al centro: \(WindowManager.roleAt(CGPoint(x: bounds.midX, y: bounds.midY))))")
+        return nil
     }
 
     /// Aggiorna monitor e scrivania di una finestra con quello che dice il server delle finestre.
