@@ -604,7 +604,6 @@ final class Engine {
 
     /// Riepilogo a schermo dopo il salvataggio, in parole semplici.
     private func reportSaved(_ scene: SavedScene) {
-        let scene = scene.withoutEmptyDesktops()
         var lines: [ActivityReport.Line] = []
         let windows = scene.windows.count
         let apps = Set(scene.windows.map(\.bundleID)).count
@@ -730,8 +729,6 @@ final class Engine {
         // Le finestre fantasma già note non contano, neanche per decidere quante scrivanie servono.
         let knownGhosts = Set(ghostWindows.keys)
         scene.windows.removeAll { $0.windowID.map { knownGhosts.contains($0) } ?? false }
-        // Le scrivanie vuote della scena non si ricreano: se ci sono e sono vuote, si tolgono.
-        scene = scene.withoutEmptyDesktops()
         guard !isBusy else { return }
         guard WindowManager.isTrusted(prompt: false) else {
             Log.write("Scena \"\(scene.name)\" non richiamata: manca il permesso di Accessibilità")
@@ -789,20 +786,15 @@ final class Engine {
         }
         clock.mark("scala")
 
-        // 2. Numero di scrivanie. Nel richiamo veloce non le tocco: annoto solo quelle da sistemare.
-        //    Nel completo ora aggiungo quelle che mancano; quelle in più le tolgo alla fine, solo se vuote.
+        // 2. Scrivanie: fanno parte della scena, anche quelle vuote. Quelle che mancano le ricreo,
+        //    quelle in più le tolgo. Le aggiunte vanno in fondo, e tolgo solo quelle oltre il numero
+        //    della scena: così le scrivanie della scena restano nel loro ordine.
+        //    Nel veloce tolgo solo quelle in più vuote; quelle con finestre le toglie il completo,
+        //    dopo aver messo a posto le finestre della scena.
         var spacesToFix: [String] = []
-        if !thorough, manageSpaces, SpacesManager.isAvailable {
-            let layouts = SpacesManager.layouts(for: displays)
-            for saved in scene.displays {
-                guard let count = saved.spaceCount, let live = displays.first(where: { $0.key == saved.key }),
-                      let have = layouts[live.id]?.count, have != count else { continue }
-                spacesToFix.append("\(Engine.label(live.name, builtin: live.isBuiltin)) ha \(have) scrivanie, nella scena sono \(count)")
-            }
-        }
         var spacesBefore: [CGDirectDisplayID: DesktopLayout] = [:]
         var spacesWanted: [CGDirectDisplayID: Int] = [:]
-        if thorough, manageSpaces, SpacesManager.isAvailable {
+        if manageSpaces, SpacesManager.isAvailable {
             var wanted: [CGDirectDisplayID: Int] = [:]
             for saved in scene.displays {
                 guard let count = saved.spaceCount, let live = displays.first(where: { $0.key == saved.key }) else { continue }
@@ -810,10 +802,18 @@ final class Engine {
             }
             spacesWanted = wanted
             spacesBefore = SpacesManager.layouts(for: displays)
-            if !wanted.isEmpty {
-                // Aggiunge quelle che mancano e toglie subito quelle in più già vuote, anche in mezzo.
+            let differs = wanted.contains { id, count in spacesBefore[id].map { $0.count != count } ?? false }
+            if differs {
                 _ = await SpacesManager.adjustSpaces(wanted: wanted, displays: displays, allowRemove: true,
                                                      ignoring: knownGhosts)
+            }
+            if !thorough {
+                let layouts = SpacesManager.layouts(for: displays)
+                for saved in scene.displays {
+                    guard let count = saved.spaceCount, let live = displays.first(where: { $0.key == saved.key }),
+                          let have = layouts[live.id]?.count, have != count else { continue }
+                    spacesToFix.append("\(Engine.label(live.name, builtin: live.isBuiltin)) ha \(have) scrivanie, nella scena sono \(count)")
+                }
             }
         }
         clock.mark("scrivanie")
@@ -834,8 +834,8 @@ final class Engine {
                             ? (diff == 1 ? "aggiunta 1 scrivania" : "aggiunte \(diff) scrivanie")
                             : (diff == 1 ? "tolta 1 scrivania" : "tolte \(diff) scrivanie")
                         notes.append(.init(text: "\(label): \(what), ora sono \(have) come nella scena"))
-                    } else if have > count {
-                        notes.append(.init(text: "\(label): nella scena le scrivanie sono \(count), adesso sono \(have). Quelle in più hanno ancora finestre sopra e non le tolgo.", warning: true))
+                    } else if have != count, !thorough {
+                        continue
                     } else if have != count {
                         notes.append(.init(text: "\(label): nella scena le scrivanie sono \(count), adesso sono \(have). Non sono riuscito a sistemarle.", warning: true))
                     }
@@ -892,13 +892,6 @@ final class Engine {
         if !ghostsInScene.isEmpty {
             scene.windows.removeAll { $0.windowID.map { ghostIDs.contains($0) } ?? false }
             Log.write("Nella scena ci sono finestre fantasma, le salto: " + ghostsInScene.map(\.appName).joined(separator: ", "))
-            // Senza i fantasmi possono servire meno scrivanie: quelle in più, se vuote, le tolgo alla fine.
-            scene = scene.withoutEmptyDesktops()
-            for saved in scene.displays {
-                guard !spacesWanted.isEmpty, let count = saved.spaceCount,
-                      let live = displays.first(where: { $0.key == saved.key }) else { continue }
-                spacesWanted[live.id] = count
-            }
         }
         clock.mark("inventario")
 
@@ -1002,9 +995,10 @@ final class Engine {
         // 8. Monitor e scrivania giusti. Nel richiamo veloce solo gli spostamenti istantanei.
         await relocate(&assignments, scene: scene, displays: displays, thorough: thorough)
         if thorough, !spacesWanted.isEmpty {
-            // Ora che le finestre sono al loro posto tolgo le scrivanie in più, solo se vuote.
+            // Ora che le finestre della scena sono al loro posto tolgo le scrivanie in più, anche con finestre:
+            // quelle finestre non sono della scena e macOS le sposta su un'altra scrivania.
             _ = await SpacesManager.adjustSpaces(wanted: spacesWanted, displays: displays, allowRemove: true,
-                                                 ignoring: Set(ghostWindows.keys))
+                                                 removeOccupied: true, ignoring: Set(ghostWindows.keys))
             refresh(&assignments, displays: displays)
         }
         reportSpaces()

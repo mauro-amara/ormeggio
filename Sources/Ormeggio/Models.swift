@@ -96,39 +96,6 @@ struct SavedScene: Codable, Identifiable {
     var icon: String?
 }
 
-extension SavedScene {
-    /// La scena senza scrivanie vuote. Su ogni monitor restano solo le scrivanie con almeno una
-    /// finestra della scena, nello stesso ordine: una scrivania vuota, in fondo o in mezzo, non serve.
-    /// Le finestre prendono il numero della loro scrivania in questa sequenza senza buchi.
-    func withoutEmptyDesktops() -> SavedScene {
-        var scene = self
-        for index in scene.displays.indices {
-            let display = scene.displays[index]
-            guard let count = display.spaceCount else { continue }
-            let used = Set(scene.windows
-                .filter { $0.displayKey == display.key && $0.fullScreen != true }
-                .compactMap(\.desktop)
-                .filter { $0 >= 1 && $0 <= count })
-                .sorted()
-            var rank: [Int: Int] = [:]
-            for (offset, desktop) in used.enumerated() { rank[desktop] = offset + 1 }
-            for window in scene.windows.indices where scene.windows[window].displayKey == display.key {
-                if let desktop = scene.windows[window].desktop, let newDesktop = rank[desktop] {
-                    scene.windows[window].desktop = newDesktop
-                }
-            }
-            let newCount = max(1, used.count)
-            scene.displays[index].spaceCount = newCount
-            if let current = display.currentDesktop {
-                // Se si guardava una scrivania vuota, resta quella con finestre subito prima.
-                let before = used.filter { $0 <= current }.count
-                scene.displays[index].currentDesktop = min(newCount, rank[current] ?? max(1, before))
-            }
-        }
-        return scene
-    }
-}
-
 extension Array {
     /// L'elemento in quella posizione, o nil se la posizione non esiste.
     subscript(safe index: Int) -> Element? {

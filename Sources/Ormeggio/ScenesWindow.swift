@@ -183,8 +183,7 @@ final class ScenesModel: ObservableObject {
 
     /// Anteprima della scena: i monitor e le finestre della scrivania che era visibile.
     func shapes(for scene: SavedScene) -> [MonitorShape] {
-        let scene = scene.withoutEmptyDesktops()
-        return scene.displays.map { display in
+        scene.displays.map { display in
             let visible = display.currentDesktop ?? 1
             let windows = scene.windows.enumerated().compactMap { item -> WindowShape? in
                 let window = item.element
@@ -207,7 +206,7 @@ final class ScenesModel: ObservableObject {
     }
 
     func desktopCount(_ scene: SavedScene) -> Int {
-        scene.withoutEmptyDesktops().displays.compactMap(\.spaceCount).reduce(0, +)
+        scene.displays.compactMap(\.spaceCount).reduce(0, +)
     }
 
     func savedWhen(_ scene: SavedScene) -> String {
