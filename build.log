@@ -1,0 +1,76 @@
+0%: Compute target dependency graph
+Building targets in dependency order
+Target dependency graph (2 targets)
+0%: Gather provisioning inputs
+0%: Create build description
+0%: Discovering version info for clang
+0%: Discovering version info for swiftc
+0%: Discovering version info for ld
+Build description signature: 9f428746ef1c9ec3a16943d0c83e8053
+
+Build description path: /Users/runner/work/ormeggio/ormeggio/.build/apple/Intermediates.noindex/XCBuildData/9f428746ef1c9ec3a16943d0c83e8053.xcbuilddata
+
+0%: Create build directory $(TARGET_BUILD_DIR)
+0%: Create build directory $(OBJROOT)
+0%: Build stat cache for /Applications/Xcode_16.4.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.5.sdk
+0%: Create build directory $(OBJROOT)/EagerLinkingTBDs/Release
+0%: Create build directory $(TARGET_BUILD_DIR)/Release
+0%: Create build directory $(TARGET_BUILD_DIR)/Release/PackageFrameworks
+0%: Write Ormeggio.DependencyStaticMetadataFileList
+0%: Write Ormeggio.DependencyMetadataFileList
+0%: Write Ormeggio_const_extract_protocols.json (x86_64)
+0%: Write Ormeggio.SwiftFileList (x86_64)
+0%: Write Ormeggio.LinkFileList (x86_64)
+0%: Write Ormeggio-OutputFileMap.json (x86_64)
+0%: Write Ormeggio_const_extract_protocols.json (arm64)
+0%: Write Ormeggio.SwiftFileList (arm64)
+0%: Write Ormeggio.LinkFileList (arm64)
+0%: Write Ormeggio-OutputFileMap.json (arm64)
+48%: Planning Swift module Ormeggio (arm64)
+48%: Planning Swift module Ormeggio (x86_64)
+50%: Compiling AppDelegate.swift, BrowserBridge.swift, ChromeSession.swift, DisplayManager.swift, Engine.swift, FinderBridge.swift, HUD.swift, Input.swift, Models.swift, Notifier.swift, OrmeggioApp.swift, ScenesWindow.swift, SpacesManager.swift, Storage.swift, Updater.swift, WindowManager.swift, ZoomManager.swift
+50%: Compiling AppDelegate.swift, BrowserBridge.swift, ChromeSession.swift, DisplayManager.swift, Engine.swift, FinderBridge.swift, HUD.swift, Input.swift, Models.swift, Notifier.swift, OrmeggioApp.swift, ScenesWindow.swift, SpacesManager.swift, Storage.swift, Updater.swift, WindowManager.swift, ZoomManager.swift
+50%: Compile Ormeggio (x86_64)
+50%: Compile Ormeggio (arm64)
+50%: Compile 17 Swift source files (x86_64)
+50%: Compile 17 Swift source files (arm64)
+initialization of immutable value 'started' was never used; consider replacing with assignment to '_' or removing it
+result of call to 'map' is unused
+missing return in instance method expected to return '[MonitorShape]'
+/Users/runner/work/ormeggio/ormeggio/Sources/Ormeggio/Engine.swift:749:13: warning: initialization of immutable value 'started' was never used; consider replacing with assignment to '_' or removing it
+        let started = Date()
+        ~~~~^~~~~~~
+        _
+/Users/runner/work/ormeggio/ormeggio/Sources/Ormeggio/ScenesWindow.swift:187:24: warning: result of call to 'map' is unused
+        scene.displays.map { display in
+                       ^   ~~~~~~~~~~~~
+/Users/runner/work/ormeggio/ormeggio/Sources/Ormeggio/ScenesWindow.swift:187:9: error: missing return in instance method expected to return '[MonitorShape]'
+        scene.displays.map { display in
+        ^
+/Users/runner/work/ormeggio/ormeggio/Sources/Ormeggio/ScenesWindow.swift:187:9: note: did you mean to return the last expression?
+        scene.displays.map { display in
+        ^
+        return 
+
+initialization of immutable value 'started' was never used; consider replacing with assignment to '_' or removing it
+result of call to 'map' is unused
+missing return in instance method expected to return '[MonitorShape]'
+/Users/runner/work/ormeggio/ormeggio/Sources/Ormeggio/Engine.swift:749:13: warning: initialization of immutable value 'started' was never used; consider replacing with assignment to '_' or removing it
+        let started = Date()
+        ~~~~^~~~~~~
+        _
+/Users/runner/work/ormeggio/ormeggio/Sources/Ormeggio/ScenesWindow.swift:187:24: warning: result of call to 'map' is unused
+        scene.displays.map { display in
+                       ^   ~~~~~~~~~~~~
+/Users/runner/work/ormeggio/ormeggio/Sources/Ormeggio/ScenesWindow.swift:187:9: error: missing return in instance method expected to return '[MonitorShape]'
+        scene.displays.map { display in
+        ^
+/Users/runner/work/ormeggio/ormeggio/Sources/Ormeggio/ScenesWindow.swift:187:9: note: did you mean to return the last expression?
+        scene.displays.map { display in
+        ^
+        return 
+
+Failed frontend command:
+/Applications/Xcode_16.4.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swift-frontend -frontend -c /Users/runner/work/ormeggio/ormeggio/Sources/Ormeggio/AppDelegate.swift /Users/runner/work/ormeggio/ormeggio/Sources/Ormeggio/BrowserBridge.swift /Users/runner/work/ormeggio/ormeggio/Sources/Ormeggio/ChromeSession.swift /Users/runner/work/ormeggio/ormeggio/Sources/Ormeggio/DisplayManager.swift /Users/runner/work/ormeggio/ormeggio/Sources/Ormeggio/Engine.swift /Users/runner/work/ormeggio/ormeggio/Sources/Ormeggio/FinderBridge.swift /Users/runner/work/ormeggio/ormeggio/Sources/Ormeggio/HUD.swift /Users/runner/work/ormeggio/ormeggio/Sources/Ormeggio/Input.swift /Users/runner/work/ormeggio/ormeggio/Sources/Ormeggio/Models.swift /Users/runner/work/ormeggio/ormeggio/Sources/Ormeggio/Notifier.swift /Users/runner/work/ormeggio/ormeggio/Sources/Ormeggio/OrmeggioApp.swift /Users/runner/work/ormeggio/ormeggio/Sources/Ormeggio/ScenesWindow.swift /Users/runner/work/ormeggio/ormeggio/Sources/Ormeggio/SpacesManager.swift /Users/runner/work/ormeggio/ormeggio/Sources/Ormeggio/Storage.swift /Users/runner/work/ormeggio/ormeggio/Sources/Ormeggio/Updater.swift /Users/runner/work/ormeggio/ormeggio/Sources/Ormeggio/WindowManager.swift /Users/runner/work/ormeggio/ormeggio/Sources/Ormeggio/ZoomManager.swift -supplementary-output-file-map /Users/runner/work/ormeggio/ormeggio/.build/apple/Intermediates.noindex/Ormeggio.build/Release/Ormeggio.build/Objects-normal/x86_64/supplementaryOutputs-1 -emit-localized-strings -emit-localized-strings-path /Users/runner/work/ormeggio/ormeggio/.build/apple/Intermediates.noindex/Ormeggio.build/Release/Ormeggio.build/Objects-normal/x86_64 -target x86_64-apple-macos14.0 -enable-objc-interop -stack-check -sdk /Applications/Xcode_16.4.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.5.sdk -I /Applications/Xcode_16.4.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib -I /Users/runner/work/ormeggio/ormeggio/.build/apple/Products/Release -I /Applications/Xcode_16.4.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib -F /Applications/Xcode_16.4.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks -F /Applications/Xcode_16.4.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/PrivateFrameworks -F /Users/runner/work/ormeggio/ormeggio/.build/apple/Products/Release -F /Applications/Xcode_16.4.app/Contents/Developer/Platforms/MacOSX.platform/Developer/Library/Frameworks -no-color-diagnostics -g -debug-info-format\=dwarf -dwarf-version\=4 -module-cache-path /Users/runner/work/ormeggio/ormeggio/.build/apple/ModuleCache.noindex -swift-version 5 -enforce-exclusivity\=checked -O -D SWIFT_PACKAGE -serialize-debugging-options -const-gather-protocols-file /Users/runner/work/ormeggio/ormeggio/.build/apple/Intermediates.noindex/Ormeggio.build/Release/Ormeggio.build/Objects-normal/x86_64/Ormeggio_const_extract_protocols.json -enable-experimental-feature DebugDescriptionMacro -enable-bare-slash-regex -empty-abi-descriptor -plugin-path /Applications/Xcode_16.4.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing -validate-clang-modules-once -clang-build-session-file /Users/runner/work/ormeggio/ormeggio/.build/apple/ModuleCache.noindex/Session.modulevalidation -Xcc -working-directory -Xcc /Users/runner/work/ormeggio/ormeggio -resource-dir /Applications/Xcode_16.4.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift -file-compilation-dir /Users/runner/work/ormeggio/ormeggio -Xcc -ivfsstatcache -Xcc /Users/runner/work/ormeggio/ormeggio/.build/apple/SDKStatCaches.noindex/macosx15.5-24F74-a403186ba963133a54a0e0cacd566b0b.sdkstatcache -Xcc -I/Users/runner/work/ormeggio/ormeggio/.build/apple/Products/Release/include -Xcc -I/Users/runner/work/ormeggio/ormeggio/.build/apple/Intermediates.noindex/Ormeggio.build/Release/Ormeggio.build/DerivedSources-normal/x86_64 -Xcc -I/Users/runner/work/ormeggio/ormeggio/.build/apple/Intermediates.noindex/Ormeggio.build/Release/Ormeggio.build/DerivedSources/x86_64 -Xcc -I/Users/runner/work/ormeggio/ormeggio/.build/apple/Intermediates.noindex/Ormeggio.build/Release/Ormeggio.build/DerivedSources -Xcc -DSWIFT_PACKAGE -module-name Ormeggio -package-name ormeggio -frontend-parseable-output -disable-clang-spi -target-sdk-version 15.5 -target-sdk-name macosx15.5 -external-plugin-path /Applications/Xcode_16.4.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib/swift/host/plugins\#/Applications/Xcode_16.4.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/bin/swift-plugin-server -external-plugin-path /Applications/Xcode_16.4.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/local/lib/swift/host/plugins\#/Applications/Xcode_16.4.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/bin/swift-plugin-server -in-process-plugin-server-path /Applications/Xcode_16.4.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/libSwiftInProcPluginServer.dylib -plugin-path /Applications/Xcode_16.4.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins -plugin-path /Applications/Xcode_16.4.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/local/lib/swift/host/plugins -enable-default-cmo -num-threads 3 -o /Users/runner/work/ormeggio/ormeggio/.build/apple/Intermediates.noindex/Ormeggio.build/Release/Ormeggio.build/Objects-normal/x86_64/AppDelegate.o -o /Users/runner/work/ormeggio/ormeggio/.build/apple/Intermediates.noindex/Ormeggio.build/Release/Ormeggio.build/Objects-normal/x86_64/BrowserBridge.o -o /Users/runner/work/ormeggio/ormeggio/.build/apple/Intermediates.noindex/Ormeggio.build/Release/Ormeggio.build/Objects-normal/x86_64/ChromeSession.o -o /Users/runner/work/ormeggio/ormeggio/.build/apple/Intermediates.noindex/Ormeggio.build/Release/Ormeggio.build/Objects-normal/x86_64/DisplayManager.o -o /Users/runner/work/ormeggio/ormeggio/.build/apple/Intermediates.noindex/Ormeggio.build/Release/Ormeggio.build/Objects-normal/x86_64/Engine.o -o /Users/runner/work/ormeggio/ormeggio/.build/apple/Intermediates.noindex/Ormeggio.build/Release/Ormeggio.build/Objects-normal/x86_64/FinderBridge.o -o /Users/runner/work/ormeggio/ormeggio/.build/apple/Intermediates.noindex/Ormeggio.build/Release/Ormeggio.build/Objects-normal/x86_64/HUD.o -o /Users/runner/work/ormeggio/ormeggio/.build/apple/Intermediates.noindex/Ormeggio.build/Release/Ormeggio.build/Objects-normal/x86_64/Input.o -o /Users/runner/work/ormeggio/ormeggio/.build/apple/Intermediates.noindex/Ormeggio.build/Release/Ormeggio.build/Objects-normal/x86_64/Models.o -o /Users/runner/work/ormeggio/ormeggio/.build/apple/Intermediates.noindex/Ormeggio.build/Release/Ormeggio.build/Objects-normal/x86_64/Notifier.o -o /Users/runner/work/ormeggio/ormeggio/.build/apple/Intermediates.noindex/Ormeggio.build/Release/Ormeggio.build/Objects-normal/x86_64/OrmeggioApp.o -o /Users/runner/work/ormeggio/ormeggio/.build/apple/Intermediates.noindex/Ormeggio.build/Release/Ormeggio.build/Objects-normal/x86_64/ScenesWindow.o -o /Users/runner/work/ormeggio/ormeggio/.build/apple/Intermediates.noindex/Ormeggio.build/Release/Ormeggio.build/Objects-normal/x86_64/SpacesManager.o -o /Users/runner/work/ormeggio/ormeggio/.build/apple/Intermediates.noindex/Ormeggio.build/Release/Ormeggio.build/Objects-normal/x86_64/Storage.o -o /Users/runner/work/ormeggio/ormeggio/.build/apple/Intermediates.noindex/Ormeggio.build/Release/Ormeggio.build/Objects-normal/x86_64/Updater.o -o /Users/runner/work/ormeggio/ormeggio/.build/apple/Intermediates.noindex/Ormeggio.build/Release/Ormeggio.build/Objects-normal/x86_64/WindowManager.o -o /Users/runner/work/ormeggio/ormeggio/.build/apple/Intermediates.noindex/Ormeggio.build/Release/Ormeggio.build/Objects-normal/x86_64/ZoomManager.o -index-unit-output-path /Ormeggio.build/Release/Ormeggio.build/Objects-normal/x86_64/AppDelegate.o -index-unit-output-path /Ormeggio.build/Release/Ormeggio.build/Objects-normal/x86_64/BrowserBridge.o -index-unit-output-path /Ormeggio.build/Release/Ormeggio.build/Objects-normal/x86_64/ChromeSession.o -index-unit-output-path /Ormeggio.build/Release/Ormeggio.build/Objects-normal/x86_64/DisplayManager.o -index-unit-output-path /Ormeggio.build/Release/Ormeggio.build/Objects-normal/x86_64/Engine.o -index-unit-output-path /Ormeggio.build/Release/Ormeggio.build/Objects-normal/x86_64/FinderBridge.o -index-unit-output-path /Ormeggio.build/Release/Ormeggio.build/Objects-normal/x86_64/HUD.o -index-unit-output-path /Ormeggio.build/Release/Ormeggio.build/Objects-normal/x86_64/Input.o -index-unit-output-path /Ormeggio.build/Release/Ormeggio.build/Objects-normal/x86_64/Models.o -index-unit-output-path /Ormeggio.build/Release/Ormeggio.build/Objects-normal/x86_64/Notifier.o -index-unit-output-path /Ormeggio.build/Release/Ormeggio.build/Objects-normal/x86_64/OrmeggioApp.o -index-unit-output-path /Ormeggio.build/Release/Ormeggio.build/Objects-normal/x86_64/ScenesWindow.o -index-unit-output-path /Ormeggio.build/Release/Ormeggio.build/Objects-normal/x86_64/SpacesManager.o -index-unit-output-path /Ormeggio.build/Release/Ormeggio.build/Objects-normal/x86_64/Storage.o -index-unit-output-path /Ormeggio.build/Release/Ormeggio.build/Objects-normal/x86_64/Updater.o -index-unit-output-path /Ormeggio.build/Release/Ormeggio.build/Objects-normal/x86_64/WindowManager.o -index-unit-output-path /Ormeggio.build/Release/Ormeggio.build/Objects-normal/x86_64/ZoomManager.o
+
+Build failed
