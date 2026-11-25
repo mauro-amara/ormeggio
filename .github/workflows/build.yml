@@ -91,7 +91,12 @@ jobs:
           git config user.email "ci@users.noreply.github.com"
           git add .
           git commit -qm "Build ${GITHUB_SHA::7}: ${{ job.status }}"
-          git push -q -f "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$BRANCH"
+          # GitHub a volte risponde con un errore momentaneo: riprovo fino a tre volte.
+          for attempt in 1 2 3; do
+            if git push -q -f "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$BRANCH"; then break; fi
+            [ "$attempt" = 3 ] && exit 1
+            sleep 10
+          done
 
       # Ogni versione anche come "Release" di GitHub, con il file Ormeggio.dmg: GitHub conta quante volte
       # viene scaricato. Il link "releases/latest/download/Ormeggio.dmg" porta sempre all'ultima.
