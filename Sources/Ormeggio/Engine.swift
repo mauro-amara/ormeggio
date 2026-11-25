@@ -227,6 +227,7 @@ final class Engine {
             subtitle: "Poi rimetto tutto come nella scena"
         ))
         waitingShown = true
+        Log.write("Monitor cambiati (\(reason)): aspetto che macOS finisca")
         // Rete di sicurezza: l'attesa non resta mai a schermo più di un minuto.
         Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 60_000_000_000)
@@ -520,7 +521,8 @@ final class Engine {
     private func inventory(displays: [LiveDisplay], profiles: [ChromeProfile],
                            knownProfiles: [CGWindowID: String] = [:],
                            excluding: Set<CGWindowID> = [],
-                           strict: Bool = false) -> [TrackedWindow] {
+                           strict: Bool = false,
+                           detectGhosts: Bool = true) -> [TrackedWindow] {
         let layouts = SpacesManager.layouts(for: displays)
         let userSpaces = Set(layouts.values.flatMap(\.spaceIDs))
         let visibleSpaces = Set(layouts.values.compactMap { layout in layout.currentIndex.flatMap { layout.spaceIDs[safe: $0] } })
@@ -599,11 +601,11 @@ final class Engine {
                     ghosts[system.id] = name
                     continue
                 }
-                if visibleSpaces.contains(spaces[0]) && !system.onScreen {
+                if detectGhosts, visibleSpaces.contains(spaces[0]) && !system.onScreen {
                     ghosts[system.id] = name
                     continue
                 }
-                if strict, !visibleSpaces.contains(spaces[0]) {
+                if detectGhosts, strict, !visibleSpaces.contains(spaces[0]) {
                     let remote = remoteWindows(pid: app.processIdentifier)
                     if remote.complete && remote.elements[system.id] == nil {
                         ghosts[system.id] = name
@@ -860,6 +862,7 @@ final class Engine {
         var spacesToFix: [String] = []
         var spacesBefore: [CGDirectDisplayID: DesktopLayout] = [:]
         var spacesWanted: [CGDirectDisplayID: Int] = [:]
+        var spacesJustChanged = false
         if manageSpaces, SpacesManager.isAvailable {
             var wanted: [CGDirectDisplayID: Int] = [:]
             for saved in scene.displays {
@@ -870,8 +873,9 @@ final class Engine {
             spacesBefore = SpacesManager.layouts(for: displays)
             let differs = wanted.contains { id, count in spacesBefore[id].map { $0.count != count } ?? false }
             if differs {
-                _ = await SpacesManager.adjustSpaces(wanted: wanted, displays: displays, allowRemove: true,
-                                                     ignoring: knownGhosts)
+                let changed = await SpacesManager.adjustSpaces(wanted: wanted, displays: displays, allowRemove: true,
+                                                               ignoring: knownGhosts)
+                spacesJustChanged = changed.added + changed.removed > 0
             }
             if !thorough {
                 let layouts = SpacesManager.layouts(for: displays)
@@ -951,7 +955,11 @@ final class Engine {
         for window in scene.windows {
             if let id = window.windowID, let profile = window.chromeProfile { knownProfiles[id] = profile }
         }
-        var tracked = inventory(displays: displays, profiles: profiles, knownProfiles: knownProfiles, strict: thorough)
+        // Subito dopo Mission Control le finestre per qualche istante non risultano disegnate:
+        // aspetto un attimo e in questo giro non dichiaro fantasma nessuna finestra nuova.
+        if spacesJustChanged { await Input.pause(0.8) }
+        var tracked = inventory(displays: displays, profiles: profiles, knownProfiles: knownProfiles,
+                                strict: thorough, detectGhosts: !spacesJustChanged)
         if usesChrome { Engine.attachChromeTabs(&tracked, profiles: profiles) }
         Log.write("Finestre trovate: \(tracked.count). " + Engine.describe(tracked))
         // Le finestre fantasma salvate in una scena (chiuse ma tenute in memoria dall'app) non si cercano più.

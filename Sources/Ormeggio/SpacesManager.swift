@@ -27,7 +27,11 @@ enum SpacesManager {
     private typealias SetWindowListWorkspaceFn = @convention(c) (Int32, UnsafePointer<UInt32>, Int32, Int32) -> Int32
 
     /// Spostamento istantaneo tra scrivanie: nil finché non l'ho provato, poi se funziona su questo Mac.
-    private(set) static var instantMovesWork: Bool?
+    /// Se non funziona lo ricordo per questa versione di macOS, così non perdo tempo a ogni avvio.
+    private(set) static var instantMovesWork: Bool? = {
+        UserDefaults.standard.string(forKey: "instantMovesFailedOn") == osVersion ? false : nil
+    }()
+    private static let osVersion = ProcessInfo.processInfo.operatingSystemVersionString
     /// Il trascinamento tra scrivanie non ha funzionato in questo richiamo: non lo riprovo con le altre finestre.
     static var dragFailed = false
 
@@ -141,6 +145,7 @@ enum SpacesManager {
         }
         if instantMovesWork == nil {
             instantMovesWork = arrived
+            if !arrived { UserDefaults.standard.set(osVersion, forKey: "instantMovesFailedOn") }
             Log.write("Spostamento istantaneo tra scrivanie: " + (arrived ? "funziona su questo Mac" : "non funziona su questo Mac, resta il trascinamento"))
         }
         return arrived
