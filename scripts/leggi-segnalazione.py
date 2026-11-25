@@ -11,6 +11,7 @@ con sale = chiave effimera e info = "ormeggio-segnalazione". Primo byte del test
 """
 import base64
 import os
+import re
 import sys
 import zlib
 
@@ -23,10 +24,11 @@ PREFIX = "ormeggio-v1:"
 
 
 def open_report(body: str, private_key_b64: str) -> str:
-    body = body.strip()
-    if not body.startswith(PREFIX):
+    # Prendo solo il blocco cifrato: quello che c'è intorno (per esempio una firma aggiunta da GitHub) non conta.
+    found = re.search(re.escape(PREFIX) + r"([A-Za-z0-9+/=]+)", body)
+    if not found:
         raise ValueError("non è una segnalazione di Ormeggio")
-    data = base64.b64decode(body[len(PREFIX):])
+    data = base64.b64decode(found.group(1))
     ephemeral, nonce, sealed = data[:32], data[32:44], data[44:]
     private = X25519PrivateKey.from_private_bytes(base64.b64decode(private_key_b64))
     shared = private.exchange(X25519PublicKey.from_public_bytes(ephemeral))

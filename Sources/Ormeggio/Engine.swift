@@ -676,9 +676,9 @@ final class Engine {
 
     // MARK: Richiamo
 
-    func recall(id: UUID) {
+    func recall(id: UUID, thorough: Bool = false) {
         guard let scene = store.scene(id: id) else { return }
-        Task { @MainActor in await self.apply(scene) }
+        Task { @MainActor in await self.apply(scene, thorough: thorough) }
     }
 
     /// Richiama una scena.

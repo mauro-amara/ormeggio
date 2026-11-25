@@ -8,7 +8,9 @@ enum ReportSender {
 
     /// Repository privato dove arrivano le segnalazioni, come issue cifrate.
     private static let channelRepo = "mauro-amara/ormeggio-segnalazioni"
-    /// Chiave di scrittura del repository, mascherata. Vuota finché il canale non è attivo.
+    /// Chiave di scrittura del repository, mascherata perché non sia leggibile a colpo d'occhio.
+    /// Non è un segreto vero: chiunque abbia l'app può ricavarla. Per questo può fare una cosa sola,
+    /// aprire issue in quel repository, e le segnalazioni partono cifrate.
     private static let maskedToken: [UInt8] = []
     private static let mask: UInt8 = 0x5A
     /// Chiave pubblica (X25519): con questa la segnalazione si chiude, e solo Claude la può aprire.
@@ -34,7 +36,13 @@ enum ReportSender {
         request.setValue("2022-11-28", forHTTPHeaderField: "X-GitHub-Api-Version")
         request.setValue("Ormeggio", forHTTPHeaderField: "User-Agent")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let issue: [String: String] = ["title": "Segnalazione \(version)", "body": "ormeggio-v1:" + sealed.base64EncodedString()]
+        let body = "ormeggio-v1:" + sealed.base64EncodedString()
+        // GitHub accetta corpi fino a 65.536 caratteri.
+        guard body.count < 65_000 else {
+            Log.write("Segnalazione troppo grande (\(body.count) caratteri)")
+            return false
+        }
+        let issue: [String: String] = ["title": "Segnalazione \(version)", "body": body]
         request.httpBody = try? JSONSerialization.data(withJSONObject: issue)
         do {
             let (_, response) = try await URLSession.shared.data(for: request)
