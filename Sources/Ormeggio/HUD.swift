@@ -96,18 +96,10 @@ final class HUD {
             panel.orderFrontRegardless()
         }
 
-        let seconds: Double?
-        switch report.kind {
-        case .working: seconds = nil
-        case .success:
-            if report.action != nil || !report.lines.allSatisfy({ $0.tone == .done }) {
-                seconds = 20
-            } else {
-                // Il tempo di leggere: qualche secondo in più per ogni riga.
-                seconds = min(30, 6 + 3 * Double(report.lines.count))
-            }
-        case .warning, .failure: seconds = 20
-        }
+        // Resta 5 secondi e sparisce. Resta finché non lo chiudi solo se c'è qualcosa da cliccare:
+        // il pulsante in fondo o "Prepara segnalazione". Mentre lavoro resta finché non ho finito.
+        let hasAction = report.action != nil || send != nil
+        let seconds: Double? = report.kind == .working || hasAction ? nil : 5
         if let seconds {
             hideTask = Task { @MainActor [weak self] in
                 try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
