@@ -27,6 +27,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         engine.onStateChange = { [weak self] in self?.updateIcon() }
         engine.onActivity = { report in HUD.shared.show(report) }
+        engine.onHideActivity = { HUD.shared.hide() }
         HUD.shared.sendDiagnostics = { [weak self] in self?.sendReport() }
         Notifier.shared.start()
         Notifier.shared.onOpenUpdate = { [weak self] in self?.showWhatsNew(afterUpdate: false) }

@@ -66,6 +66,10 @@ final class Engine {
     var onStateChange: (@MainActor () -> Void)?
     /// Avvisa l'interfaccia di cosa sta facendo e di cosa ha fatto (richiamo e salvataggio).
     var onActivity: (@MainActor (ActivityReport) -> Void)?
+    /// Toglie il riquadro a schermo.
+    var onHideActivity: (@MainActor () -> Void)?
+    /// Il riquadro "Monitor collegati: aspetto che macOS finisca" è a schermo e nessun altro l'ha sostituito.
+    private var waitingShown = false
     /// Chiede all'utente il profilo delle finestre di Chrome che Ormeggio non riconosce da solo.
     var askChromeProfiles: (@MainActor (_ titles: [String], _ profiles: [ChromeProfile]) -> [String?])?
 
@@ -202,6 +206,9 @@ final class Engine {
         }
         guard fingerprint != previous, !isBusy else {
             refreshState()
+            // Un controllo precedente aveva mostrato l'attesa ed è stato annullato: i monitor sono tornati
+            // come prima, quindi non c'è niente da fare e il riquadro non deve restare.
+            if !isBusy { clearWaiting() }
             return
         }
         if let active = activeScene, active.fingerprint != fingerprint {
@@ -211,6 +218,7 @@ final class Engine {
         guard autoApplyEnabled, store.autoScene(for: fingerprint) != nil else {
             lastFingerprint = fingerprint
             Log.write("Monitor cambiati (\(reason)): nessuna scena automatica per questi monitor")
+            clearWaiting()
             return
         }
         onActivity?(ActivityReport(
@@ -218,17 +226,40 @@ final class Engine {
             title: "Monitor collegati: aspetto che macOS finisca",
             subtitle: "Poi rimetto tutto come nella scena"
         ))
+        waitingShown = true
+        // Rete di sicurezza: l'attesa non resta mai a schermo più di un minuto.
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 60_000_000_000)
+            guard let self, self.waitingShown, !self.isBusy else { return }
+            Log.write("Attesa dei monitor rimasta a schermo per un minuto: la tolgo")
+            self.clearWaiting()
+        }
         // Se arrivano altri cambiamenti, questo controllo viene annullato e ne parte uno nuovo.
         guard await waitForStableDisplays(), !Task.isCancelled else { return }
         let settled = DisplayManager.fingerprint(DisplayManager.activeDisplays())
         lastFingerprint = settled
         guard let scene = store.autoScene(for: settled) else {
             Log.write("Monitor cambiati (\(reason)): a monitor fermi nessuna scena automatica")
+            waitingShown = false
             onActivity?(ActivityReport(kind: .success, title: "Nessuna scena per questi monitor", subtitle: nil))
+            return
+        }
+        // Se sto già lavorando (per esempio un salvataggio) ci riprovo appena finisco.
+        if isBusy {
+            lastFingerprint = previous
+            recheckWhenIdle = true
+            Log.write("Monitor fermi ma sto lavorando: richiamo \"\(scene.name)\" appena finisco")
             return
         }
         Log.write("Richiamo automatico di \"\(scene.name)\" (\(reason))")
         await apply(scene)
+    }
+
+    /// Toglie il riquadro di attesa dei monitor, se è ancora a schermo.
+    private func clearWaiting() {
+        guard waitingShown else { return }
+        waitingShown = false
+        onHideActivity?()
     }
 
     /// Dopo un cambio di monitor macOS impiega diversi secondi a rimettere le scrivanie sul monitor giusto.
@@ -755,6 +786,7 @@ final class Engine {
             return
         }
         isBusy = true
+        waitingShown = false
         refreshState()
         let started = Date()
         var notes: [ActivityReport.Line] = []
