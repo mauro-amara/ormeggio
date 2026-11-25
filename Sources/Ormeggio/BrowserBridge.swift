@@ -400,6 +400,71 @@ enum BrowserBridge {
         }
     }
 
+    // MARK: Scheda provvisoria per lo zoom
+
+    /// Solo nomi di sito semplici (lettere, numeri, punti, trattini): finiscono in un indirizzo e in uno script.
+    static func isPlainHost(_ host: String) -> Bool {
+        let allowed = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyz0123456789.-")
+        let lower = host.lowercased()
+        return !lower.isEmpty && lower.count <= 253 && lower.contains(".")
+            && !lower.hasPrefix(".") && !lower.hasPrefix("-")
+            && lower.unicodeScalars.allSatisfy { allowed.contains($0) }
+    }
+
+    /// Pagina leggera del sito: basta per mettere lo zoom, che in Chrome vale per tutto il sito.
+    static func zoomAddress(_ host: String) -> String {
+        "https://\(host.lowercased())/robots.txt"
+    }
+
+    /// Apre una scheda provvisoria sul sito nella finestra di Chrome in primo piano.
+    /// Restituisce la scheda che era attiva prima (da 1) e il numero della scheda nuova.
+    static func openTemporaryTab(host: String) -> (previous: Int, id: Int)? {
+        guard isPlainHost(host) else { return nil }
+        let source = """
+        tell application "Google Chrome"
+            set w to front window
+            set previousTab to active tab index of w
+            set t to make new tab at end of tabs of w with properties {URL:"\(escape(zoomAddress(host)))"}
+            return (previousTab as text) & "," & (id of t as text)
+        end tell
+        """
+        guard let result = run(source) else { return nil }
+        let parts = result.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        guard parts.count == 2, let previous = Int(parts[0]), let id = Int(parts[1]) else { return nil }
+        return (previous, id)
+    }
+
+    /// Scheda attiva della finestra di Chrome in primo piano: indirizzo e se sta ancora caricando.
+    static func frontTabState() -> (address: String, loading: Bool)? {
+        let source = """
+        tell application "Google Chrome"
+            set t to active tab of front window
+            return (loading of t as text) & " " & (URL of t)
+        end tell
+        """
+        guard let result = run(source) else { return nil }
+        let parts = result.split(separator: " ", maxSplits: 1).map(String.init)
+        guard parts.count == 2 else { return nil }
+        return (parts[1], parts[0] == "true")
+    }
+
+    /// Chiude la scheda provvisoria, in qualunque finestra sia, e rimette attiva la scheda di prima.
+    static func closeTemporaryTab(id: Int, previous: Int) {
+        let source = """
+        tell application "Google Chrome"
+            repeat with w in windows
+                set found to (tabs of w whose id is \(id))
+                if (count of found) > 0 then
+                    close item 1 of found
+                    set active tab index of w to \(previous)
+                    exit repeat
+                end if
+            end repeat
+        end tell
+        """
+        _ = run(source)
+    }
+
     // MARK: AppleScript
 
     private static func escape(_ text: String) -> String {

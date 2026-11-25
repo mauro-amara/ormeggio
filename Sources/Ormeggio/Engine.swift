@@ -1461,8 +1461,20 @@ final class Engine {
                         && isOnVisibleDesktop(assignment.tracked, displays: displays)
                 }
                 guard let live = candidate?.tracked.live else {
-                    Log.write("Zoom di Chrome su \(host) (profilo \(profile)): nessuna scheda di quel sito in vista, lo lascio")
-                    notVisible.append(host)
+                    // Nessuna scheda di quel sito in vista: apro un attimo una scheda del sito, ci metto lo zoom
+                    // (in Chrome vale per tutto il sito, anche per le schede sulle altre scrivanie) e la chiudo.
+                    let steps = BrowserBridge.chromeSteps(from: current.defaultLevel, to: level)
+                    switch await zoomWithTemporaryTab(host: host, profile: profile, steps: steps, pid: chrome.processIdentifier,
+                                                      assignments: assignments, displays: displays) {
+                    case .done:
+                        Log.write("Zoom di Chrome su \(host) (profilo \(profile)): da \(Engine.percent(now))% a \(Engine.percent(level))% applicato con una scheda provvisoria")
+                        applied.append("\(host) al \(Engine.percent(level))%")
+                    case .noWindow:
+                        Log.write("Zoom di Chrome su \(host) (profilo \(profile)): nessuna finestra di quel profilo in vista, lo lascio")
+                        notVisible.append(host)
+                    case .failed:
+                        failed.append(host)
+                    }
                     continue
                 }
                 WindowManager.raise(live)
@@ -1483,6 +1495,68 @@ final class Engine {
             }
         }
         return (applied, failed, notVisible)
+    }
+
+    private enum TemporaryZoom { case done, noWindow, failed }
+
+    /// Mette lo zoom di un sito aprendo per un attimo una scheda di quel sito in una finestra di Chrome in vista,
+    /// dello stesso profilo. Se non c'è, apre per un attimo una finestra nuova di quel profilo.
+    /// Prima di toccare lo zoom controlla che la scheda sia davvero su quel sito; alla fine la chiude.
+    private func zoomWithTemporaryTab(host: String, profile: String, steps: Int, pid: pid_t,
+                                      assignments: [Assignment], displays: [LiveDisplay]) async -> TemporaryZoom {
+        guard BrowserBridge.isPlainHost(host), !Engine.singleSessionHosts.contains(host.lowercased()) else { return .noWindow }
+        let window = assignments.first { assignment in
+            let tracked = assignment.tracked
+            return assignment.saved.bundleID == BrowserBridge.chromeID
+                && (tracked.chromeProfile ?? assignment.saved.chromeProfile) == profile
+                && tracked.live != nil && !tracked.isMinimized && !tracked.isFullScreen
+                && tracked.frame.width >= 600 && tracked.frame.height >= 400
+                && !(tracked.activeTab.map { BrowserBridge.isMeeting($0) } ?? false)
+                && isOnVisibleDesktop(tracked, displays: displays)
+        }?.tracked.live
+
+        var tab: (previous: Int, id: Int)?
+        var temporaryWindow: CGWindowID?
+        if let window {
+            WindowManager.raise(window)
+            await Input.pause(0.15)
+            guard BrowserBridge.focusedChromeWindow(pid: pid)?.id == window.windowID else {
+                Log.write("Zoom di Chrome su \(host): la finestra non è andata in primo piano")
+                return .failed
+            }
+            tab = BrowserBridge.openTemporaryTab(host: host)
+            guard tab != nil else { return .failed }
+        } else {
+            let before = BrowserBridge.focusedChromeWindow(pid: pid)?.id
+            BrowserBridge.openChromeWindow(profile: profile, urls: [BrowserBridge.zoomAddress(host)])
+            for _ in 0..<40 {
+                await Input.pause(0.1)
+                if let id = BrowserBridge.focusedChromeWindow(pid: pid)?.id, id != before {
+                    temporaryWindow = id
+                    break
+                }
+            }
+            guard temporaryWindow != nil else { return .noWindow }
+        }
+
+        // Aspetto che la pagina sia caricata e controllo che sia rimasta su quel sito.
+        var onSite = false
+        for _ in 0..<50 {
+            await Input.pause(0.1)
+            guard let state = BrowserBridge.frontTabState(), !state.loading else { continue }
+            onSite = BrowserBridge.host(of: state.address)?.lowercased() == host.lowercased()
+            break
+        }
+        var done = false
+        if onSite {
+            done = await ZoomManager.setZoom(pid: pid, steps: steps, appName: "Chrome")
+            await Input.pause(0.3)
+        } else {
+            Log.write("Zoom di Chrome su \(host): la scheda provvisoria non è rimasta su quel sito, non tocco lo zoom")
+        }
+        if let tab { BrowserBridge.closeTemporaryTab(id: tab.id, previous: tab.previous) }
+        if let temporaryWindow { _ = BrowserBridge.closeWindow(id: temporaryWindow, pid: pid) }
+        return done ? .done : .failed
     }
 
     /// Una finestra di Chrome già aperta (su qualsiasi scrivania o nel Dock) con le stesse schede di quella salvata:

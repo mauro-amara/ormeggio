@@ -57,7 +57,7 @@ La prima volta che salvi con Finder, Chrome o Safari aperti, macOS chiede se Orm
 
 ### Zoom
 
-Lo zoom di Chrome Ormeggio lo salva da solo, sito per sito e profilo per profilo, e lo rimette quando richiami la scena. Chrome scrive lo zoom con qualche secondo di ritardo: Ormeggio lo rilegge 12 secondi dopo il salvataggio e aggiorna la scena. Per le altre app (per esempio Slack): Vedi le scene > menu della scena > **Zoom delle app…**, scegli l'ingrandimento di ogni app.
+Lo zoom di Chrome Ormeggio lo salva da solo, sito per sito e profilo per profilo, e lo rimette quando richiami la scena. In Chrome lo zoom vale per tutto il sito: se nessuna scheda di quel sito è in vista, Ormeggio apre per un attimo una scheda del sito, ci mette lo zoom e la richiude. Chrome scrive lo zoom con qualche secondo di ritardo: Ormeggio lo rilegge 12 secondi dopo il salvataggio e aggiorna la scena. Per le altre app (per esempio Slack): Vedi le scene > menu della scena > **Zoom delle app…**, scegli l'ingrandimento di ogni app.
 
 ### Aggiornamenti
 
