@@ -1,0 +1,71 @@
+0%: Compute target dependency graph
+Building targets in dependency order
+Target dependency graph (2 targets)
+0%: Gather provisioning inputs
+0%: Create build description
+0%: Discovering version info for swiftc
+0%: Discovering version info for clang
+0%: Discovering version info for ld
+Build description signature: 696eb0e38d34c9b079df5f74391a3087
+
+Build description path: /Users/runner/work/ormeggio/ormeggio/.build/apple/Intermediates.noindex/XCBuildData/696eb0e38d34c9b079df5f74391a3087.xcbuilddata
+
+0%: Create build directory $(OBJROOT)
+0%: Create build directory $(TARGET_BUILD_DIR)
+0%: Build stat cache for /Applications/Xcode_16.4.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.5.sdk
+0%: Create build directory $(TARGET_BUILD_DIR)/Release
+0%: Create build directory $(OBJROOT)/EagerLinkingTBDs/Release
+0%: Create build directory $(TARGET_BUILD_DIR)/Release/PackageFrameworks
+0%: Write Ormeggio.DependencyMetadataFileList
+0%: Write Ormeggio.DependencyStaticMetadataFileList
+0%: Write Ormeggio_const_extract_protocols.json (x86_64)
+0%: Write Ormeggio.SwiftFileList (x86_64)
+0%: Write Ormeggio.LinkFileList (x86_64)
+0%: Write Ormeggio-OutputFileMap.json (x86_64)
+0%: Write Ormeggio_const_extract_protocols.json (arm64)
+0%: Write Ormeggio.SwiftFileList (arm64)
+0%: Write Ormeggio.LinkFileList (arm64)
+0%: Write Ormeggio-OutputFileMap.json (arm64)
+48%: Planning Swift module Ormeggio (x86_64)
+48%: Planning Swift module Ormeggio (arm64)
+50%: Compile Ormeggio (arm64)
+50%: Compiling AppDelegate.swift, BrowserBridge.swift, ChromeSession.swift, DisplayManager.swift, Engine.swift, FinderBridge.swift, HUD.swift, Input.swift, Models.swift, Notifier.swift, OrmeggioApp.swift, ScenesWindow.swift, SpacesManager.swift, Storage.swift, Updater.swift, WindowManager.swift, ZoomManager.swift
+50%: Compiling AppDelegate.swift, BrowserBridge.swift, ChromeSession.swift, DisplayManager.swift, Engine.swift, FinderBridge.swift, HUD.swift, Input.swift, Models.swift, Notifier.swift, OrmeggioApp.swift, ScenesWindow.swift, SpacesManager.swift, Storage.swift, Updater.swift, WindowManager.swift, ZoomManager.swift
+50%: Compile Ormeggio (x86_64)
+50%: Compile 17 Swift source files (arm64)
+50%: Compile 17 Swift source files (x86_64)
+initialization of immutable value 'started' was never used; consider replacing with assignment to '_' or removing it
+/Users/runner/work/ormeggio/ormeggio/Sources/Ormeggio/Engine.swift:797:13: warning: initialization of immutable value 'started' was never used; consider replacing with assignment to '_' or removing it
+        let started = Date()
+        ~~~~^~~~~~~
+        _
+
+58%: Discovering Swift tasks after 'Compiling AppDelegate.swift, BrowserBridge.swift, ChromeSession.swift, DisplayManager.swift, Engine.swift, FinderBridge.swift, HUD.swift, Input.swift, Models.swift, Notifier.swift, OrmeggioApp.swift, ScenesWindow.swift, SpacesManager.swift, Storage.swift, Updater.swift, WindowManager.swift, ZoomManager.swift'
+58%: Unblock downstream dependents of Ormeggio (arm64)
+58%: Copy Ormeggio.swiftmodule (arm64)
+58%: Link Ormeggio (arm64)
+58%: Copy Ormeggio.swiftdoc (arm64)
+58%: Copy Ormeggio.abi.json (arm64)
+58%: Copy Ormeggio.swiftsourceinfo (arm64)
+initialization of immutable value 'started' was never used; consider replacing with assignment to '_' or removing it
+/Users/runner/work/ormeggio/ormeggio/Sources/Ormeggio/Engine.swift:797:13: warning: initialization of immutable value 'started' was never used; consider replacing with assignment to '_' or removing it
+        let started = Date()
+        ~~~~^~~~~~~
+        _
+
+75%: Discovering Swift tasks after 'Compiling AppDelegate.swift, BrowserBridge.swift, ChromeSession.swift, DisplayManager.swift, Engine.swift, FinderBridge.swift, HUD.swift, Input.swift, Models.swift, Notifier.swift, OrmeggioApp.swift, ScenesWindow.swift, SpacesManager.swift, Storage.swift, Updater.swift, WindowManager.swift, ZoomManager.swift'
+75%: Unblock downstream dependents of Ormeggio (x86_64)
+75%: Copy Ormeggio.swiftmodule (x86_64)
+75%: Link Ormeggio (x86_64)
+75%: Copy Ormeggio.swiftdoc (x86_64)
+75%: Copy Ormeggio.abi.json (x86_64)
+75%: Copy Ormeggio.swiftsourceinfo (x86_64)
+91%: Create universal binary Ormeggio
+91%: Generate Ormeggio.dSYM for Ormeggio
+97%: Register execution policy exception for Ormeggio
+100%: Build succeeded
+Build complete!
+build/Ormeggio.app: replacing existing signature
+build/Ormeggio.app: valid on disk
+build/Ormeggio.app: satisfies its Designated Requirement
+Creata build/Ormeggio.app
